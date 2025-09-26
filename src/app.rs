@@ -7,6 +7,7 @@ pub enum Focusable {
     Search,
     Results,
     Command,
+    None,
 }
 
 impl Focusable {
@@ -15,6 +16,7 @@ impl Focusable {
             Self::Search => Self::Results,
             Self::Results => Self::Command,
             Self::Command => Self::Search,
+            Self::None => Self::Search,
         }
     }
 
@@ -23,6 +25,7 @@ impl Focusable {
             Self::Search => Self::Command,
             Self::Results => Self::Search,
             Self::Command => Self::Results,
+            Self::None => Self::Command,
         }
     }
 }

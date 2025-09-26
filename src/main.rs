@@ -89,6 +89,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                 Focusable::Command => {
                                     app.mode = InputMode::Command;
                                 }
+                                Focusable::None => {}
                             },
                             _ => {}
                         },
@@ -107,6 +108,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 app.mode = InputMode::Normal;
+                                app.focused_panel = Focusable::None;
                             }
                             _ => {
                                 app.search_input.handle_event(&Event::Key(key));
@@ -124,6 +126,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 app.mode = InputMode::Normal;
+                                app.focused_panel = Focusable::None;
                             }
                             _ => {
                                 app.command_input.handle_event(&Event::Key(key));
@@ -174,6 +177,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 app.mode = InputMode::Normal;
+                                app.results_list_state.select(None);
+                                app.focused_panel = Focusable::None;
                             }
                             _ => {}
                         },
