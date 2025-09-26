@@ -45,6 +45,7 @@ pub struct App {
     pub focused_panel: Focusable,
     pub search_results: Vec<api::VideoResult>,
     pub results_list_state: ListState,
+    pub video_info: Option<api::VideoInfo>,
     pub last_error: Option<String>,
 }
 
@@ -57,6 +58,7 @@ impl App {
             focused_panel: Focusable::Search,
             search_results: Vec::new(),
             results_list_state: ListState::default(),
+            video_info: None,
             last_error: None,
         }
     }

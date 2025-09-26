@@ -1,5 +1,6 @@
 mod api;
 mod app;
+mod command;
 mod ui;
 
 use app::{App, Focusable, InputMode};
@@ -91,6 +92,13 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                 }
                                 Focusable::None => {}
                             },
+                            KeyCode::Char(':') => {
+                                if app.focused_panel == Focusable::Command {
+                                    app.mode = InputMode::Command;
+                                    app.command_input.reset();
+                                    app.command_input.handle_event(&Event::Key(key));
+                                }
+                            }
                             _ => {}
                         },
                         InputMode::Editing => match key.code {
@@ -116,13 +124,24 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                         },
                         InputMode::Command => match key.code {
                             KeyCode::Enter => {
-                                let command = app.command_input.value().to_string();
-                                if command == ":q" {
-                                    return Ok(());
-                                }
-                                // TODO: execute other commands
+                                let command_str = app.command_input.value().to_string();
                                 app.command_input.reset();
                                 app.mode = InputMode::Normal;
+
+                                match command::parse(&command_str) {
+                                    Ok(cmd) => {
+                                        if let command::Command::Quit = cmd {
+                                            return Ok(());
+                                        }
+                                        match command::execute(cmd, &mut app).await {
+                                            Ok(_) => app.last_error = None,
+                                            Err(e) => app.last_error = Some(e),
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.last_error = Some(e);
+                                    }
+                                }
                             }
                             KeyCode::Char('q') | KeyCode::Esc => {
                                 app.mode = InputMode::Normal;
