@@ -3,6 +3,7 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+use textwrap;
 
 pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -109,13 +110,27 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                 .search_results
                 .iter()
                 .map(|video| {
-                    let content = format!(
-                        "{} - {} (▶ {})",
-                        video.title,
+                    let text_width = chunks[1].width.saturating_sub(6) as usize;
+                    let options = textwrap::Options::new(text_width)
+                        .initial_indent("")
+                        .subsequent_indent("  ");
+
+                    let title_wrapped = textwrap::wrap(&video.title, options);
+
+                    let mut lines: Vec<Line> = title_wrapped
+                        .iter()
+                        .map(|s| Line::from(s.to_string()))
+                        .collect();
+
+                    let meta_info = format!(
+                        "{} (▶ {})",
                         video.author,
                         video.play.to_string().trim_matches('"')
                     );
-                    ListItem::new(content)
+                    lines.push(Line::from(meta_info.italic().fg(Color::DarkGray)));
+                    lines.push(Line::from("")); // Add blank line for spacing
+
+                    ListItem::new(lines)
                 })
                 .collect();
 
