@@ -73,14 +73,20 @@ impl App {
     }
 
     pub fn play_video(&self) {
-        if let Some(selected) = self.results_list_state.selected() {
-            if let Some(video) = self.search_results.get(selected) {
-                let url = format!("https://www.bilibili.com/video/{}", video.bvid);
-                std::process::Command::new("mpv")
-                    .arg(url)
-                    .spawn()
-                    .expect("failed to play video");
-            }
+        let bvid = if let Some(info) = &self.video_info {
+            Some(info.bvid.clone())
+        } else if let Some(selected) = self.results_list_state.selected() {
+            self.search_results.get(selected).map(|v| v.bvid.clone())
+        } else {
+            None
+        };
+
+        if let Some(bvid) = bvid {
+            let url = format!("https://www.bilibili.com/video/{}", bvid);
+            std::process::Command::new("mpv")
+                .arg(url)
+                .spawn()
+                .expect("failed to play video");
         }
     }
 }

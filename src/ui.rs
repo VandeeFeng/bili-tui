@@ -75,7 +75,16 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             };
             let info_panel = Paragraph::new(detail_text)
                 .wrap(ratatui::widgets::Wrap { trim: true })
-                .block(Block::default().title("Video Details").borders(Borders::ALL));
+                .block(
+                    Block::default()
+                        .title("Video Details")
+                        .borders(Borders::ALL)
+                        .border_style(if app.focused_panel == Focusable::Results {
+                            Style::default().fg(Color::Green)
+                        } else {
+                            Style::default()
+                        }),
+                );
             f.render_widget(info_panel, chunks[1]);
         }
         InputMode::Help => {

@@ -156,11 +156,28 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                         },
                         InputMode::Detail => match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => {
-                                app.mode = InputMode::ListNav;
+                            KeyCode::Char('j') => {
+                                app.focused_panel = app.focused_panel.next();
                             }
+                            KeyCode::Char('k') => {
+                                app.focused_panel = app.focused_panel.prev();
+                            }
+                            KeyCode::Enter => match app.focused_panel {
+                                Focusable::Search => {
+                                    app.mode = InputMode::Editing;
+                                }
+                                Focusable::Command => {
+                                    app.mode = InputMode::Command;
+                                }
+                                _ => {}
+                            },
                             KeyCode::Char('p') => {
                                 app.play_video();
+                            }
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                app.mode = InputMode::Normal;
+                                app.focused_panel = Focusable::None;
+                                app.video_info = None;
                             }
                             _ => {}
                         },
