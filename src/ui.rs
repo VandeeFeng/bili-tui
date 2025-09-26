@@ -78,6 +78,23 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                 .block(Block::default().title("Video Details").borders(Borders::ALL));
             f.render_widget(info_panel, chunks[1]);
         }
+        InputMode::Help => {
+            let help_text = vec![
+                Line::from("Commands:".bold()),
+                Line::from("  :video <url>       - Play video with mpv"),
+                Line::from("  :video-info <url>  - Show video details"),
+                Line::from("  :help              - Show this help message"),
+                Line::from("  :q                 - Quit the application"),
+                Line::from(""),
+                Line::from("Navigation:".bold()),
+                Line::from("  j/k                - Move focus between panels"),
+                Line::from("  Enter              - Select/Enter panel"),
+                Line::from("  q/Esc              - Exit current mode/panel"),
+            ];
+            let help_panel = Paragraph::new(help_text)
+                .block(Block::default().title("Help").borders(Borders::ALL));
+            f.render_widget(help_panel, chunks[1]);
+        }
         _ => {
             let results: Vec<ListItem> = app
                 .search_results

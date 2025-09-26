@@ -36,6 +36,7 @@ pub enum InputMode {
     Command,
     Detail,
     ListNav,
+    Help,
 }
 
 pub struct App {

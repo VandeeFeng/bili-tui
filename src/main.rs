@@ -98,6 +98,10 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                     app.command_input.reset();
                                     app.command_input.handle_event(&Event::Key(key));
                                 }
+                            },
+                            KeyCode::Char('/') => {
+                                app.focused_panel = Focusable::Search;
+                                app.mode = InputMode::Editing;
                             }
                             _ => {}
                         },
@@ -201,6 +205,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                             _ => {}
                         },
+                        InputMode::Help => {
+                            app.mode = InputMode::Normal;
+                        }
                     }
                 }
             }

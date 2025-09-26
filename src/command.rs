@@ -6,6 +6,7 @@ use url::Url;
 pub enum Command {
     PlayUrl(String),
     ShowVideoInfo(String),
+    Help,
     Quit,
 }
 
@@ -32,6 +33,7 @@ pub fn parse(input: &str) -> Result<Command, String> {
             }
             Ok(Command::ShowVideoInfo(args[0].to_string()))
         }
+        "help" => Ok(Command::Help),
         "q" => Ok(Command::Quit),
         _ => Err(format!("Unknown command: {}", command)),
     }
@@ -80,6 +82,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             } else {
                 Err("Invalid Bilibili URL or BVID".to_string())
             }
+        }
+        Command::Help => {
+            app.mode = InputMode::Help;
+            Ok(())
         }
         Command::Quit => {
             Ok(())
