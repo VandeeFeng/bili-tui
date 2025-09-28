@@ -2,6 +2,8 @@
 
 A TUI client for Bilibili written in Rust, created as a practice project. It provides a simple terminal interface for searching and playing videos directly from a URL.
 
+Inspired by: [Siriusmart/youtube-tui: An aesthetically pleasing YouTube TUI written in Rust](https://github.com/Siriusmart/youtube-tui)
+
 ## Features
 
 - **Video Search**: Search for Bilibili videos directly within the application.
@@ -28,6 +30,22 @@ Ensure you have the following software installed on your system:
     ```bash
     cargo run
     ```
+
+To get better search results and video quality, you can provide your Bilibili cookie via the `BILI_COOKIE` environment variable.
+
+```bash
+export BILI_COOKIE="your_cookie_value_here"
+```
+
+The application reads this variable and adds the cookie to its API requests in `src/api.rs`:
+```rust
+// src/api.rs
+let cookie = std::env::var("BILI_COOKIE").unwrap_or_else(|_| "".to_string());
+// ...
+let response = client.get(&url).header("Cookie", cookie).send().await?;
+```
+
+**Security Warning**: Storing cookies in environment variables can be a security risk on shared systems. Use with caution.
 
 ## Commands
 Navigation with JK and enter.

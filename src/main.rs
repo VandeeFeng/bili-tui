@@ -23,7 +23,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // create app and run it
     let app = App::new();
     let res = run_app(&mut terminal, app).await;
 

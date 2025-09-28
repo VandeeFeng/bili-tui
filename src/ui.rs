@@ -128,7 +128,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                         video.play.to_string().trim_matches('"')
                     );
                     lines.push(Line::from(meta_info.italic().fg(Color::DarkGray)));
-                    lines.push(Line::from("")); // Add blank line for spacing
+                    lines.push(Line::from(""));
 
                     ListItem::new(lines)
                 })
