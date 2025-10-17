@@ -23,8 +23,11 @@ pub struct Owner {
 pub struct Stat {
     pub view: u64,
     pub like: u64,
+    #[allow(dead_code)]
     pub coin: u64,
+    #[allow(dead_code)]
     pub favorite: u64,
+    #[allow(dead_code)]
     pub share: u64,
 }
 
@@ -48,6 +51,7 @@ pub struct VideoResult {
     pub description: String,
     pub play: serde_json::Value,
     pub like: u64,
+    #[allow(dead_code)]
     pub video_review: u64,
     pub duration: String,
 }

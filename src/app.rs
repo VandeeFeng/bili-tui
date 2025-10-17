@@ -2,7 +2,7 @@ use crate::api;
 use crate::handler::handle_key_event;
 use crate::terminal;
 use crate::ui;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, KeyCode};
 use ratatui::widgets::ListState;
 use std::{error::Error, io, time::Duration};
 use tui_input::Input;
@@ -13,6 +13,73 @@ pub enum Focusable {
     Search,
     Results,
     None,
+}
+
+/// Trait for handling common keyboard event patterns across different modes
+pub trait StateHandler {
+    /// Handle common navigation keys (j/k, :, ?, q/Esc)
+    fn handle_common_keys(&mut self, key: crossterm::event::KeyEvent) -> CommonKeyResult;
+
+    /// Toggle command mode
+    fn activate_command(&mut self);
+
+    /// Toggle help mode
+    fn activate_help(&mut self);
+}
+
+/// Result of handling common keys
+#[derive(Debug, PartialEq)]
+pub enum CommonKeyResult {
+    /// Key was handled as a common action
+    Handled,
+    /// Key should be processed by mode-specific logic
+    Continue,
+    /// Application should quit
+    Quit,
+}
+
+impl StateHandler for App {
+    fn handle_common_keys(&mut self, key: crossterm::event::KeyEvent) -> CommonKeyResult {
+        match key.code {
+            KeyCode::Char(':') => {
+                self.activate_command();
+                CommonKeyResult::Handled
+            }
+            KeyCode::Char('?') => {
+                self.activate_help();
+                CommonKeyResult::Handled
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                CommonKeyResult::Quit
+            }
+            _ => CommonKeyResult::Continue,
+        }
+    }
+
+    fn activate_command(&mut self) {
+        self.command_active = true;
+        self.command_input.reset();
+    }
+
+    fn activate_help(&mut self) {
+        self.help_active = true;
+    }
+}
+
+/// Trait for focus navigation
+pub trait FocusNavigation {
+    fn move_focus_next(&mut self);
+    fn move_focus_prev(&mut self);
+}
+
+impl FocusNavigation for App {
+    fn move_focus_next(&mut self) {
+        self.focused_panel = self.focused_panel.next();
+    }
+
+    fn move_focus_prev(&mut self) {
+        self.focused_panel = self.focused_panel.prev();
+    }
 }
 
 impl Focusable {
@@ -131,7 +198,7 @@ impl App {
                     self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
                 }
                 Err(e) => {
-                    self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Error);
+                    self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
                 }
             }
         }
@@ -161,8 +228,8 @@ impl App {
                 }
             }
 
-            if event::poll(Duration::from_millis(50))? {
-                if let Event::Key(key) = event::read()? {
+            if event::poll(Duration::from_millis(50))?
+                && let Event::Key(key) = event::read()? {
                     match handle_key_event(&mut self, key, &tx).await {
                         Ok(should_quit) => {
                             if should_quit {
@@ -175,7 +242,6 @@ impl App {
                         Err(e) => break Err(e.into()),
                     }
                 }
-            }
         };
 
         terminal::restore_terminal(&mut terminal)?;

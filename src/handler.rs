@@ -1,4 +1,4 @@
-use crate::app::{App, Focusable, InputMode};
+use crate::app::{App, Focusable, InputMode, StateHandler, FocusNavigation, CommonKeyResult};
 use crate::command;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use std::io;
@@ -30,13 +30,19 @@ pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx
 }
 
 fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
+    // Handle common keys first
+    match app.handle_common_keys(key) {
+        CommonKeyResult::Handled => return Ok(()),
+        CommonKeyResult::Quit => return Err(io::Error::other("quit")),
+        CommonKeyResult::Continue => {} // Continue to mode-specific handling
+    }
+
     match key.code {
-        KeyCode::Char('q') => return Err(io::Error::new(io::ErrorKind::Other, "quit")),
         KeyCode::Char('j') => {
-            app.focused_panel = app.focused_panel.next();
+            app.move_focus_next();
         }
         KeyCode::Char('k') => {
-            app.focused_panel = app.focused_panel.prev();
+            app.move_focus_prev();
         }
         KeyCode::Enter => match app.focused_panel {
             Focusable::Search => {
@@ -47,16 +53,9 @@ fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &toki
             }
             Focusable::None => {}
         },
-        KeyCode::Char(':') => {
-            app.command_active = true;
-            app.command_input.reset();
-        }
         KeyCode::Char('/') => {
             app.focused_panel = Focusable::Search;
             app.mode = InputMode::Editing;
-        }
-        KeyCode::Char('?') => {
-            app.help_active = true;
         }
         _ => {}
     }
@@ -64,6 +63,24 @@ fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &toki
 }
 
 fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
+    // Handle common keys first, but with custom quit behavior for editing mode
+    match key.code {
+        KeyCode::Char(':') => {
+            app.activate_command();
+            return Ok(());
+        }
+        KeyCode::Char('?') => {
+            app.activate_help();
+            return Ok(());
+        }
+        KeyCode::Char('q') | KeyCode::Esc => {
+            app.mode = InputMode::Normal;
+            app.focused_panel = Focusable::None;
+            return Ok(());
+        }
+        _ => {}
+    }
+
     match key.code {
         KeyCode::Enter => {
             let query = app.search_input.value().to_string();
@@ -76,13 +93,6 @@ fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &toki
                 let _ = tx.send(response).await;
             });
             app.mode = InputMode::Normal;
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
-            app.mode = InputMode::Normal;
-            app.focused_panel = Focusable::None;
-        }
-        KeyCode::Char('?') => {
-            app.help_active = true;
         }
         _ => {
             app.search_input.handle_event(&Event::Key(key));
@@ -129,33 +139,37 @@ async fn handle_command_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
 }
 
 fn handle_detail_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
+    // Handle common keys first, but with custom quit behavior for detail mode
     match key.code {
-        KeyCode::Char('j') => {
-            app.focused_panel = app.focused_panel.next();
-        }
-        KeyCode::Char('k') => {
-            app.focused_panel = app.focused_panel.prev();
-        }
-        KeyCode::Enter => match app.focused_panel {
-            Focusable::Search => {
-                app.mode = InputMode::Editing;
-            }
-            _ => {}
-        },
-        KeyCode::Char('p') => {
-            app.play_video();
-        }
         KeyCode::Char(':') => {
-            app.command_active = true;
-            app.command_input.reset();
+            app.activate_command();
+            return Ok(());
         }
         KeyCode::Char('?') => {
-            app.help_active = true;
+            app.activate_help();
+            return Ok(());
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.mode = InputMode::Normal;
             app.focused_panel = Focusable::None;
             app.video_info = None;
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    match key.code {
+        KeyCode::Char('j') => {
+            app.move_focus_next();
+        }
+        KeyCode::Char('k') => {
+            app.move_focus_prev();
+        }
+        KeyCode::Enter => if app.focused_panel == Focusable::Search {
+            app.mode = InputMode::Editing;
+        },
+        KeyCode::Char('p') => {
+            app.play_video();
         }
         _ => {}
     }
@@ -163,6 +177,25 @@ fn handle_detail_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Res
 }
 
 fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
+    // Handle common keys first, but with custom quit behavior for list nav mode
+    match key.code {
+        KeyCode::Char(':') => {
+            app.activate_command();
+            return Ok(());
+        }
+        KeyCode::Char('?') => {
+            app.activate_help();
+            return Ok(());
+        }
+        KeyCode::Char('q') | KeyCode::Esc => {
+            app.mode = InputMode::Normal;
+            app.results_list_state.select(None);
+            app.focused_panel = Focusable::None;
+            return Ok(());
+        }
+        _ => {}
+    }
+
     match key.code {
         KeyCode::Char('j') => {
             if !app.search_results.is_empty() {
@@ -197,18 +230,6 @@ fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::R
         KeyCode::Enter => {
             app.mode = InputMode::Detail;
         }
-        KeyCode::Char(':') => {
-            app.command_active = true;
-            app.command_input.reset();
-        }
-        KeyCode::Char('?') => {
-            app.help_active = true;
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
-            app.mode = InputMode::Normal;
-            app.results_list_state.select(None);
-            app.focused_panel = Focusable::None;
-        }
         _ => {}
     }
     Ok(())
@@ -217,8 +238,7 @@ fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::R
 fn handle_help_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<bool> {
     match key.code {
         KeyCode::Char(':') => {
-            app.command_active = true;
-            app.command_input.reset();
+            app.activate_command();
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.help_active = false;

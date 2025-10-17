@@ -13,7 +13,7 @@ pub enum Command {
 pub fn parse(input: &str) -> Result<Command, String> {
     let input = input.trim();
     let parts: Vec<&str> = input.split_whitespace().collect();
-    let command = parts.get(0).ok_or("No command entered")?;
+    let command = parts.first().ok_or("No command entered")?;
     let args = &parts[1..];
 
     match *command {
@@ -39,19 +39,16 @@ fn extract_bvid(input: &str) -> Option<String> {
     if input.starts_with("BV") {
         return Some(input.to_string());
     }
-    if let Ok(url) = Url::parse(input) {
-        if let Some(domain) = url.domain() {
-            if domain.ends_with("bilibili.com") {
-                if let Some(path_segments) = url.path_segments() {
+    if let Ok(url) = Url::parse(input)
+        && let Some(domain) = url.domain()
+            && domain.ends_with("bilibili.com")
+                && let Some(path_segments) = url.path_segments() {
                     for segment in path_segments {
                         if segment.starts_with("BV") {
                             return Some(segment.to_string());
                         }
                     }
                 }
-            }
-        }
-    }
     None
 }
 

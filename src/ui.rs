@@ -3,7 +3,88 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
-use textwrap;
+
+/// Trait for rendering UI widgets with consistent styling
+pub trait WidgetRenderer {
+    /// Create a bordered block with focus-aware styling
+    fn create_focused_block<'a>(&self, title: &'a str, focused: bool) -> Block<'a>;
+
+    /// Create a popup block with consistent styling
+    fn create_popup_block<'a>(&self, title: &'a str, color: Color) -> Block<'a>;
+
+    /// Calculate popup area centered in the given frame
+    fn calculate_popup_area(&self, frame_size: Rect, width: u16, height: u16) -> Rect;
+}
+
+/// Trait for rendering messages with consistent styling
+pub trait MessageRenderer {
+    /// Get the color and style for a message level
+    fn get_message_style(&self, level: &MessageLevel) -> Style;
+
+    /// Render a message bar with the latest message
+    fn render_message_bar(&self, f: &mut Frame, area: Rect, app: &App);
+}
+
+impl WidgetRenderer for App {
+    fn create_focused_block<'a>(&self, title: &'a str, focused: bool) -> Block<'a> {
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(if focused {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            })
+    }
+
+    fn create_popup_block<'a>(&self, title: &'a str, color: Color) -> Block<'a> {
+        Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color))
+    }
+
+    fn calculate_popup_area(&self, frame_size: Rect, width: u16, height: u16) -> Rect {
+        let popup_width = width.min(frame_size.width.saturating_sub(4));
+        let popup_x = (frame_size.width - popup_width) / 2;
+        let popup_y = (frame_size.height - height) / 2;
+        Rect::new(popup_x, popup_y, popup_width, height)
+    }
+}
+
+impl MessageRenderer for App {
+    fn get_message_style(&self, level: &MessageLevel) -> Style {
+        match level {
+            MessageLevel::Info => Style::default().fg(Color::Blue),
+            MessageLevel::Success => Style::default().fg(Color::Green),
+            MessageLevel::Warning => Style::default().fg(Color::Yellow),
+            MessageLevel::Error => Style::default().fg(Color::Red),
+        }
+    }
+
+    fn render_message_bar(&self, f: &mut Frame, area: Rect, app: &App) {
+        if let Some(message) = app.get_latest_message() {
+            let style = self.get_message_style(&message.level);
+            let message_bar = Paragraph::new(message.text.clone())
+                .block(
+                    Block::default()
+                        .title("Messages")
+                        .borders(Borders::ALL)
+                        .border_style(style),
+                );
+            f.render_widget(message_bar, area);
+        } else {
+            // Render empty message bar
+            let empty_message_bar = Paragraph::new("")
+                .block(
+                    Block::default()
+                        .title("Messages")
+                        .borders(Borders::ALL),
+                );
+            f.render_widget(empty_message_bar, area);
+        }
+    }
+}
 
 pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -15,16 +96,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         ])
         .split(f.size());
 
-    let search_bar = Paragraph::new(app.search_input.value()).block(
-        Block::default()
-            .title("Search")
-            .borders(Borders::ALL)
-            .border_style(if app.focused_panel == Focusable::Search {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
-            }),
-    );
+    let search_focused = app.focused_panel == Focusable::Search;
+    let search_bar = Paragraph::new(app.search_input.value())
+        .block(app.create_focused_block("Search", search_focused));
     f.render_widget(search_bar, chunks[0]);
 
     if app.is_editing() {
@@ -97,18 +171,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                 } else {
                     vec![]
                 };
+                let details_focused = app.focused_panel == Focusable::Results;
                 let info_panel = Paragraph::new(detail_text)
                     .wrap(ratatui::widgets::Wrap { trim: true })
-                    .block(
-                        Block::default()
-                            .title("Video Details")
-                            .borders(Borders::ALL)
-                            .border_style(if app.focused_panel == Focusable::Results {
-                                Style::default().fg(Color::Green)
-                            } else {
-                                Style::default()
-                            }),
-                    );
+                    .block(app.create_focused_block("Video Details", details_focused));
                 f.render_widget(info_panel, chunks[1]);
             }
                       _ => {
@@ -141,17 +207,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                     })
                     .collect();
 
+                let results_focused = app.focused_panel == Focusable::Results;
                 let results_list = List::new(results)
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("Results")
-                            .border_style(if app.focused_panel == Focusable::Results {
-                                Style::default().fg(Color::Green)
-                            } else {
-                                Style::default()
-                            }),
-                    )
+                    .block(app.create_focused_block("Results", results_focused))
                     .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                     .highlight_symbol(">> ");
 
@@ -162,23 +220,13 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     // Render command popup if active
     if app.is_commanding() {
-        let popup_width = 60.min(f.size().width.saturating_sub(4));
-        let popup_height = 3;
-        let popup_x = (f.size().width - popup_width) / 2;
-        let popup_y = (f.size().height - popup_height) / 2;
-
-        let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+        let popup_area = app.calculate_popup_area(f.size(), 60, 3);
 
         // Clear the background area to create a clean background
         f.render_widget(Clear, popup_area);
 
         let command_popup = Paragraph::new(app.command_input.value())
-            .block(
-                Block::default()
-                    .title("Command")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green)),
-            );
+            .block(app.create_popup_block("Command", Color::Green));
         f.render_widget(command_popup, popup_area);
 
         f.set_cursor(
@@ -187,52 +235,16 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         );
     }
 
-    // Render message bar
-    if let Some(message) = app.get_latest_message() {
-        let (message_text, style) = match message.level {
-            MessageLevel::Info => (message.text.clone(), Style::default().fg(Color::Blue)),
-            MessageLevel::Success => (message.text.clone(), Style::default().fg(Color::Green)),
-            MessageLevel::Warning => (message.text.clone(), Style::default().fg(Color::Yellow)),
-            MessageLevel::Error => (message.text.clone(), Style::default().fg(Color::Red)),
-        };
-
-        let message_bar = Paragraph::new(message_text)
-            .block(
-                Block::default()
-                    .title("Messages")
-                    .borders(Borders::ALL)
-                    .border_style(style),
-            );
-        f.render_widget(message_bar, chunks[2]);
-    } else {
-        // Render empty message bar
-        let empty_message_bar = Paragraph::new("")
-            .block(
-                Block::default()
-                    .title("Messages")
-                    .borders(Borders::ALL),
-            );
-        f.render_widget(empty_message_bar, chunks[2]);
-    }
+    // Render message bar using the new trait
+    app.render_message_bar(f, chunks[2], app);
 
     // Render error popup if there's an error and show_error_popup is true
-    if app.show_error_popup {
-        if let Some(error) = &app.last_error {
-            let popup_width = 60.min(f.size().width.saturating_sub(4));
-            let popup_height = 3;
-            let popup_x = (f.size().width - popup_width) / 2;
-            let popup_y = (f.size().height - popup_height) / 2;
-
-            let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    if app.show_error_popup
+        && let Some(error) = &app.last_error {
+            let popup_area = app.calculate_popup_area(f.size(), 60, 3);
 
             let error_popup = Paragraph::new(error.as_str())
-                .block(
-                    Block::default()
-                        .title("Error")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Red)),
-                );
+                .block(app.create_popup_block("Error", Color::Red));
             f.render_widget(error_popup, popup_area);
         }
-    }
 }
