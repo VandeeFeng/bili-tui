@@ -1,6 +1,12 @@
 use crate::api;
+use crate::handler::handle_key_event;
+use crate::terminal;
+use crate::ui;
+use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
+use std::{error::Error, io, time::Duration};
 use tui_input::Input;
+use tokio::sync::mpsc;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Focusable {
@@ -30,10 +36,8 @@ impl Focusable {
 pub enum InputMode {
     Normal,
     Editing,
-    Command,
     Detail,
     ListNav,
-    Help,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +58,8 @@ pub struct App {
     pub search_input: Input,
     pub command_input: Input,
     pub mode: InputMode,
+    pub command_active: bool,
+    pub help_active: bool,
     pub focused_panel: Focusable,
     pub search_results: Vec<api::VideoResult>,
     pub results_list_state: ListState,
@@ -69,6 +75,8 @@ impl App {
             search_input: Input::default(),
             command_input: Input::default(),
             mode: InputMode::Normal,
+            command_active: false,
+            help_active: false,
             focused_panel: Focusable::Search,
             search_results: Vec::new(),
             results_list_state: ListState::default(),
@@ -104,7 +112,11 @@ impl App {
     }
 
     pub fn is_commanding(&self) -> bool {
-        matches!(self.mode, InputMode::Command)
+        self.command_active
+    }
+
+    pub fn is_helping(&self) -> bool {
+        self.help_active
     }
 
     pub fn play_video(&mut self) {
@@ -131,5 +143,50 @@ impl App {
                 }
             }
         }
+    }
+
+    pub async fn run(mut self) -> Result<(), Box<dyn Error>> {
+        let mut terminal = terminal::setup_terminal()?;
+        let (tx, mut rx) = mpsc::channel(1);
+
+        let result = loop {
+            terminal.draw(|f| ui::ui(f, &mut self))?;
+
+            if let Ok(response) = rx.try_recv() {
+                match response {
+                    Ok(results) => {
+                        self.search_results = results;
+                        if !self.search_results.is_empty() {
+                            self.results_list_state.select(Some(0));
+                        }
+                        self.mode = InputMode::ListNav;
+                        self.focused_panel = Focusable::Results;
+                        self.add_message("Search completed".to_string(), MessageLevel::Success);
+                    }
+                    Err(e) => {
+                        self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
+                    }
+                }
+            }
+
+            if event::poll(Duration::from_millis(50))? {
+                if let Event::Key(key) = event::read()? {
+                    match handle_key_event(&mut self, key, &tx).await {
+                        Ok(should_quit) => {
+                            if should_quit {
+                                break Ok(());
+                            }
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" => {
+                            break Ok(());
+                        }
+                        Err(e) => break Err(e.into()),
+                    }
+                }
+            }
+        };
+
+        terminal::restore_terminal(&mut terminal)?;
+        result
     }
 }

@@ -1,7 +1,7 @@
 use crate::app::{App, Focusable, InputMode, MessageLevel};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 use textwrap;
 
@@ -34,122 +34,124 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         );
     }
 
-    match app.mode {
-        InputMode::Detail => {
-            let detail_text = if let Some(info) = &app.video_info {
-                vec![
-                    Line::from(vec!["Title: ".bold(), Span::raw(info.title.clone())]),
-                    Line::from(vec!["Author: ".bold(), Span::raw(info.owner.name.clone())]),
-                    Line::from(vec!["Plays: ".bold(), Span::raw(info.stat.view.to_string())]),
-                    Line::from(vec!["Likes: ".bold(), Span::raw(info.stat.like.to_string())]),
-                    Line::from(""),
-                    Line::from(Span::raw(info.desc.clone())),
-                    Line::from(""),
-                    Line::from("[P]lay with mpv".bold()),
-                ]
-            } else if let Some(selected) = app.results_list_state.selected() {
-                if let Some(video) = app.search_results.get(selected) {
-                    let text = vec![
-                        Line::from(vec![
-                            "Title: ".bold(),
-                            Span::raw(video.title.clone()),
-                        ]),
-                        Line::from(vec![
-                            "Plays: ".bold(),
-                            Span::raw(video.play.to_string().trim_matches('"').to_string()),
-                        ]),
-                        Line::from(vec![
-                            "Likes: ".bold(),
-                            Span::raw(video.like.to_string()),
-                        ]),
+    if app.help_active {
+        let help_text = vec![
+            Line::from("Commands:".bold()),
+            Line::from("  video <url>        - Play video with mpv"),
+            Line::from("  video-info <url>   - Show video details"),
+            Line::from("  help               - Show this help message"),
+            Line::from("  q                  - Quit the application"),
+            Line::from(""),
+            Line::from("Navigation:".bold()),
+            Line::from("  j/k                - Move focus between panels"),
+            Line::from("  Enter              - Select/Enter panel"),
+            Line::from("  q/Esc              - Exit current mode/panel"),
+            Line::from("  :                  - Open command popup"),
+            Line::from("  ?                  - Show help"),
+        ];
+        let help_panel = Paragraph::new(help_text)
+            .block(Block::default().title("Help").borders(Borders::ALL));
+        f.render_widget(help_panel, chunks[1]);
+    } else {
+        match app.mode {
+            InputMode::Detail => {
+                let detail_text = if let Some(info) = &app.video_info {
+                    vec![
+                        Line::from(vec!["Title: ".bold(), Span::raw(info.title.clone())]),
+                        Line::from(vec!["Author: ".bold(), Span::raw(info.owner.name.clone())]),
+                        Line::from(vec!["Plays: ".bold(), Span::raw(info.stat.view.to_string())]),
+                        Line::from(vec!["Likes: ".bold(), Span::raw(info.stat.like.to_string())]),
                         Line::from(""),
-                        Line::from(Span::raw(video.description.clone())),
+                        Line::from(Span::raw(info.desc.clone())),
                         Line::from(""),
                         Line::from("[P]lay with mpv".bold()),
-                    ];
-                    text
+                    ]
+                } else if let Some(selected) = app.results_list_state.selected() {
+                    if let Some(video) = app.search_results.get(selected) {
+                        let text = vec![
+                            Line::from(vec![
+                                "Title: ".bold(),
+                                Span::raw(video.title.clone()),
+                            ]),
+                            Line::from(vec![
+                                "Plays: ".bold(),
+                                Span::raw(video.play.to_string().trim_matches('"').to_string()),
+                            ]),
+                            Line::from(vec![
+                                "Likes: ".bold(),
+                                Span::raw(video.like.to_string()),
+                            ]),
+                            Line::from(""),
+                            Line::from(Span::raw(video.description.clone())),
+                            Line::from(""),
+                            Line::from("[P]lay with mpv".bold()),
+                        ];
+                        text
+                    } else {
+                        vec![]
+                    }
                 } else {
                     vec![]
-                }
-            } else {
-                vec![]
-            };
-            let info_panel = Paragraph::new(detail_text)
-                .wrap(ratatui::widgets::Wrap { trim: true })
-                .block(
-                    Block::default()
-                        .title("Video Details")
-                        .borders(Borders::ALL)
-                        .border_style(if app.focused_panel == Focusable::Results {
-                            Style::default().fg(Color::Green)
-                        } else {
-                            Style::default()
-                        }),
-                );
-            f.render_widget(info_panel, chunks[1]);
-        }
-        InputMode::Help => {
-            let help_text = vec![
-                Line::from("Commands:".bold()),
-                Line::from("  video <url>        - Play video with mpv"),
-                Line::from("  video-info <url>   - Show video details"),
-                Line::from("  help               - Show this help message"),
-                Line::from("  q                  - Quit the application"),
-                Line::from(""),
-                Line::from("Navigation:".bold()),
-                Line::from("  j/k                - Move focus between panels"),
-                Line::from("  Enter              - Select/Enter panel"),
-                Line::from("  q/Esc              - Exit current mode/panel"),
-                Line::from("  :                  - Open command popup"),
-            ];
-            let help_panel = Paragraph::new(help_text)
-                .block(Block::default().title("Help").borders(Borders::ALL));
-            f.render_widget(help_panel, chunks[1]);
-        }
-        _ => {
-            let results: Vec<ListItem> = app
-                .search_results
-                .iter()
-                .map(|video| {
-                    let text_width = chunks[1].width.saturating_sub(6) as usize;
-                    let options = textwrap::Options::new(text_width)
-                        .initial_indent("")
-                        .subsequent_indent("  ");
-
-                    let title_wrapped = textwrap::wrap(&video.title, options);
-
-                    let mut lines: Vec<Line> = title_wrapped
-                        .iter()
-                        .map(|s| Line::from(s.to_string()))
-                        .collect();
-
-                    let meta_info = format!(
-                        "{} (▶ {})",
-                        video.author,
-                        video.play.to_string().trim_matches('"')
+                };
+                let info_panel = Paragraph::new(detail_text)
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .block(
+                        Block::default()
+                            .title("Video Details")
+                            .borders(Borders::ALL)
+                            .border_style(if app.focused_panel == Focusable::Results {
+                                Style::default().fg(Color::Green)
+                            } else {
+                                Style::default()
+                            }),
                     );
-                    lines.push(Line::from(meta_info.italic().fg(Color::DarkGray)));
-                    lines.push(Line::from(""));
+                f.render_widget(info_panel, chunks[1]);
+            }
+                      _ => {
+                let results: Vec<ListItem> = app
+                    .search_results
+                    .iter()
+                    .map(|video| {
+                        let text_width = chunks[1].width.saturating_sub(6) as usize;
+                        let options = textwrap::Options::new(text_width)
+                            .initial_indent("")
+                            .subsequent_indent("  ");
 
-                    ListItem::new(lines)
-                })
-                .collect();
+                        let title_wrapped = textwrap::wrap(&video.title, options);
 
-            let results_list = List::new(results)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Results")
-                        .border_style(if app.focused_panel == Focusable::Results {
-                            Style::default().fg(Color::Green)
-                        } else {
-                            Style::default()
-                        }),
-                )
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                .highlight_symbol(">> ");
+                        let mut lines: Vec<Line> = title_wrapped
+                            .iter()
+                            .map(|s| Line::from(s.to_string()))
+                            .collect();
 
-            f.render_stateful_widget(results_list, chunks[1], &mut app.results_list_state);
+                        let meta_info = format!(
+                            "{} (▶ {})",
+                            video.author,
+                            video.play.to_string().trim_matches('"')
+                        );
+                        lines.push(Line::from(meta_info.italic().fg(Color::DarkGray)));
+                        lines.push(Line::from(""));
+
+                        ListItem::new(lines)
+                    })
+                    .collect();
+
+                let results_list = List::new(results)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Results")
+                            .border_style(if app.focused_panel == Focusable::Results {
+                                Style::default().fg(Color::Green)
+                            } else {
+                                Style::default()
+                            }),
+                    )
+                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                    .highlight_symbol(">> ");
+
+                f.render_stateful_widget(results_list, chunks[1], &mut app.results_list_state);
+            }
         }
     }
 
@@ -161,6 +163,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         let popup_y = (f.size().height - popup_height) / 2;
 
         let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+        // Clear the background area to create a clean background
+        f.render_widget(Clear, popup_area);
 
         let command_popup = Paragraph::new(app.command_input.value())
             .block(

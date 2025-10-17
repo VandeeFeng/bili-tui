@@ -81,7 +81,7 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
         }
         Command::Help => {
-            app.mode = InputMode::Help;
+            app.help_active = true;
             Ok(())
         }
         Command::Quit => {
