@@ -1,4 +1,4 @@
-use crate::app::{App, Focusable, InputMode};
+use crate::app::{App, Focusable, InputMode, MessageLevel};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -9,8 +9,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
+            Constraint::Length(3),     // Search bar
+            Constraint::Min(0),        // Main content area
+            Constraint::Length(3),     // Message bar
         ])
         .split(f.size());
 
@@ -176,22 +177,52 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         );
     }
 
-    // Render error popup if there's an error
-    if let Some(error) = &app.last_error {
-        let popup_width = 60.min(f.size().width.saturating_sub(4));
-        let popup_height = 3;
-        let popup_x = (f.size().width - popup_width) / 2;
-        let popup_y = (f.size().height - popup_height) / 2;
+    // Render message bar
+    if let Some(message) = app.get_latest_message() {
+        let (message_text, style) = match message.level {
+            MessageLevel::Info => (message.text.clone(), Style::default().fg(Color::Blue)),
+            MessageLevel::Success => (message.text.clone(), Style::default().fg(Color::Green)),
+            MessageLevel::Warning => (message.text.clone(), Style::default().fg(Color::Yellow)),
+            MessageLevel::Error => (message.text.clone(), Style::default().fg(Color::Red)),
+        };
 
-        let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-        let error_popup = Paragraph::new(error.as_str())
+        let message_bar = Paragraph::new(message_text)
             .block(
                 Block::default()
-                    .title("Error")
+                    .title("Messages")
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Red)),
+                    .border_style(style),
             );
-        f.render_widget(error_popup, popup_area);
+        f.render_widget(message_bar, chunks[2]);
+    } else {
+        // Render empty message bar
+        let empty_message_bar = Paragraph::new("")
+            .block(
+                Block::default()
+                    .title("Messages")
+                    .borders(Borders::ALL),
+            );
+        f.render_widget(empty_message_bar, chunks[2]);
+    }
+
+    // Render error popup if there's an error and show_error_popup is true
+    if app.show_error_popup {
+        if let Some(error) = &app.last_error {
+            let popup_width = 60.min(f.size().width.saturating_sub(4));
+            let popup_height = 3;
+            let popup_x = (f.size().width - popup_width) / 2;
+            let popup_y = (f.size().height - popup_height) / 2;
+
+            let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+            let error_popup = Paragraph::new(error.as_str())
+                .block(
+                    Block::default()
+                        .title("Error")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Red)),
+                );
+            f.render_widget(error_popup, popup_area);
+        }
     }
 }

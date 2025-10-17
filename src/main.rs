@@ -3,7 +3,7 @@ mod app;
 mod command;
 mod ui;
 
-use app::{App, Focusable, InputMode};
+use app::{App, Focusable, InputMode, MessageLevel};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -57,10 +57,10 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                     }
                     app.mode = InputMode::ListNav;
                     app.focused_panel = Focusable::Results;
-                    app.last_error = None;
+                    app.add_message("Search completed".to_string(), MessageLevel::Success);
                 }
                 Err(e) => {
-                    app.last_error = Some(e);
+                    app.add_message(format!("Search failed: {}", e), MessageLevel::Error);
                 }
             }
         }
@@ -131,12 +131,16 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                             return Ok(());
                                         }
                                         match command::execute(cmd, &mut app).await {
-                                            Ok(_) => app.last_error = None,
-                                            Err(e) => app.last_error = Some(e),
+                                            Ok(_) => {
+                                        app.add_message("Command executed successfully".to_string(), MessageLevel::Success);
+                                    }
+                                            Err(e) => {
+                                                app.add_message(format!("Command execution failed: {}", e), MessageLevel::Error);
+                                            }
                                         }
                                     }
                                     Err(e) => {
-                                        app.last_error = Some(e);
+                                        app.add_message(format!("Command parsing error: {}", e), MessageLevel::Error);
                                     }
                                 }
                             }

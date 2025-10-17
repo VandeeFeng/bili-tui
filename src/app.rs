@@ -36,6 +36,20 @@ pub enum InputMode {
     Help,
 }
 
+#[derive(Debug, Clone)]
+pub struct Message {
+    pub text: String,
+    pub level: MessageLevel,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
 pub struct App {
     pub search_input: Input,
     pub command_input: Input,
@@ -45,6 +59,8 @@ pub struct App {
     pub results_list_state: ListState,
     pub video_info: Option<api::VideoInfo>,
     pub last_error: Option<String>,
+    pub messages: Vec<Message>,
+    pub show_error_popup: bool,
 }
 
 impl App {
@@ -58,7 +74,29 @@ impl App {
             results_list_state: ListState::default(),
             video_info: None,
             last_error: None,
+            messages: Vec::new(),
+            show_error_popup: false,
         }
+    }
+
+    pub fn add_message(&mut self, text: String, level: MessageLevel) {
+        self.messages.push(Message {
+            text,
+            level,
+        });
+
+        // Keep only last 50 messages
+        if self.messages.len() > 50 {
+            self.messages.remove(0);
+        }
+    }
+
+    pub fn clear_messages(&mut self) {
+        self.messages.clear();
+    }
+
+    pub fn get_latest_message(&self) -> Option<&Message> {
+        self.messages.last()
     }
 
     pub fn is_editing(&self) -> bool {
@@ -69,7 +107,7 @@ impl App {
         matches!(self.mode, InputMode::Command)
     }
 
-    pub fn play_video(&self) {
+    pub fn play_video(&mut self) {
         let bvid = if let Some(info) = &self.video_info {
             Some(info.bvid.clone())
         } else if let Some(selected) = self.results_list_state.selected() {
@@ -80,10 +118,18 @@ impl App {
 
         if let Some(bvid) = bvid {
             let url = format!("https://www.bilibili.com/video/{}", bvid);
-            std::process::Command::new("mpv")
+            match std::process::Command::new("mpv")
+                .arg("--no-terminal") // showoff mpv terminal output
                 .arg(url)
                 .spawn()
-                .expect("failed to play video");
+            {
+                Ok(_) => {
+                    self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
+                }
+                Err(e) => {
+                    self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Error);
+                }
+            }
         }
     }
 }

@@ -59,10 +59,11 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
     match command {
         Command::PlayUrl(url) => {
             std::process::Command::new("mpv")
+                .arg("--no-terminal")
                 .arg(&url)
                 .spawn()
                 .map_err(|e| format!("Failed to play video: {}", e))?;
-            app.last_error = Some(format!("Playing: {}", url));
+            app.add_message(format!("Playing: {}", url), crate::app::MessageLevel::Info);
             Ok(())
         }
         Command::ShowVideoInfo(url_or_bvid) => {
