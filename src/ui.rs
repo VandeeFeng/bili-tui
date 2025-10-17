@@ -11,7 +11,6 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(0),
-            Constraint::Length(3),
         ])
         .split(f.size());
 
@@ -91,15 +90,16 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         InputMode::Help => {
             let help_text = vec![
                 Line::from("Commands:".bold()),
-                Line::from("  :video <url>       - Play video with mpv"),
-                Line::from("  :video-info <url>  - Show video details"),
-                Line::from("  :help              - Show this help message"),
-                Line::from("  :q                 - Quit the application"),
+                Line::from("  video <url>        - Play video with mpv"),
+                Line::from("  video-info <url>   - Show video details"),
+                Line::from("  help               - Show this help message"),
+                Line::from("  q                  - Quit the application"),
                 Line::from(""),
                 Line::from("Navigation:".bold()),
                 Line::from("  j/k                - Move focus between panels"),
                 Line::from("  Enter              - Select/Enter panel"),
                 Line::from("  q/Esc              - Exit current mode/panel"),
+                Line::from("  :                  - Open command popup"),
             ];
             let help_panel = Paragraph::new(help_text)
                 .block(Block::default().title("Help").borders(Borders::ALL));
@@ -152,32 +152,46 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         }
     }
 
-    if let Some(error) = &app.last_error {
-        let command_line = Paragraph::new(error.as_str()).block(
-            Block::default()
-                .title("Error")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red)),
+    // Render command popup if active
+    if app.is_commanding() {
+        let popup_width = 60.min(f.size().width.saturating_sub(4));
+        let popup_height = 3;
+        let popup_x = (f.size().width - popup_width) / 2;
+        let popup_y = (f.size().height - popup_height) / 2;
+
+        let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+        let command_popup = Paragraph::new(app.command_input.value())
+            .block(
+                Block::default()
+                    .title("Command")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)),
+            );
+        f.render_widget(command_popup, popup_area);
+
+        f.set_cursor(
+            popup_area.x + app.command_input.visual_cursor() as u16 + 1,
+            popup_area.y + 1,
         );
-        f.render_widget(command_line, chunks[2]);
-    } else {
-        let command_line = Paragraph::new(app.command_input.value()).block(
-            Block::default()
-                .title("Command")
-                .borders(Borders::ALL)
-                .border_style(if app.focused_panel == Focusable::Command {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default()
-                }),
-        );
-        f.render_widget(command_line, chunks[2]);
     }
 
-    if app.is_commanding() {
-        f.set_cursor(
-            chunks[2].x + app.command_input.visual_cursor() as u16 + 1,
-            chunks[2].y + 1,
-        );
+    // Render error popup if there's an error
+    if let Some(error) = &app.last_error {
+        let popup_width = 60.min(f.size().width.saturating_sub(4));
+        let popup_height = 3;
+        let popup_x = (f.size().width - popup_width) / 2;
+        let popup_y = (f.size().height - popup_height) / 2;
+
+        let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+        let error_popup = Paragraph::new(error.as_str())
+            .block(
+                Block::default()
+                    .title("Error")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Red)),
+            );
+        f.render_widget(error_popup, popup_area);
     }
 }

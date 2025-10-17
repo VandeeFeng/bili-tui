@@ -6,7 +6,6 @@ use tui_input::Input;
 pub enum Focusable {
     Search,
     Results,
-    Command,
     None,
 }
 
@@ -14,18 +13,16 @@ impl Focusable {
     pub fn next(self) -> Self {
         match self {
             Self::Search => Self::Results,
-            Self::Results => Self::Command,
-            Self::Command => Self::Search,
+            Self::Results => Self::Search,
             Self::None => Self::Search,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Search => Self::Command,
+            Self::Search => Self::Results,
             Self::Results => Self::Search,
-            Self::Command => Self::Results,
-            Self::None => Self::Command,
+            Self::None => Self::Results,
         }
     }
 }

@@ -86,17 +86,11 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                 Focusable::Results => {
                                     app.mode = InputMode::ListNav;
                                 }
-                                Focusable::Command => {
-                                    app.mode = InputMode::Command;
-                                }
                                 Focusable::None => {}
                             },
                             KeyCode::Char(':') => {
-                                if app.focused_panel == Focusable::Command {
-                                    app.mode = InputMode::Command;
-                                    app.command_input.reset();
-                                    app.command_input.handle_event(&Event::Key(key));
-                                }
+                                app.mode = InputMode::Command;
+                                app.command_input.reset();
                             },
                             KeyCode::Char('/') => {
                                 app.focused_panel = Focusable::Search;
@@ -165,9 +159,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                                 Focusable::Search => {
                                     app.mode = InputMode::Editing;
                                 }
-                                Focusable::Command => {
-                                    app.mode = InputMode::Command;
-                                }
                                 _ => {}
                             },
                             KeyCode::Char('p') => {
@@ -221,9 +212,12 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Re
                             }
                             _ => {}
                         },
-                        InputMode::Help => {
-                            app.mode = InputMode::Normal;
-                        }
+                        InputMode::Help => match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                app.mode = InputMode::Normal;
+                            }
+                            _ => {}
+                        },
                     }
                 }
             }
