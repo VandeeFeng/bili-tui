@@ -99,10 +99,6 @@ impl App {
         }
     }
 
-    pub fn clear_messages(&mut self) {
-        self.messages.clear();
-    }
-
     pub fn get_latest_message(&self) -> Option<&Message> {
         self.messages.last()
     }
@@ -113,10 +109,6 @@ impl App {
 
     pub fn is_commanding(&self) -> bool {
         self.command_active
-    }
-
-    pub fn is_helping(&self) -> bool {
-        self.help_active
     }
 
     pub fn play_video(&mut self) {

@@ -81,6 +81,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                                 "Likes: ".bold(),
                                 Span::raw(video.like.to_string()),
                             ]),
+                            Line::from(vec![
+                                "Duration: ".bold(),
+                                Span::raw(video.duration.clone()),
+                            ]),
                             Line::from(""),
                             Line::from(Span::raw(video.description.clone())),
                             Line::from(""),
@@ -125,9 +129,10 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                             .collect();
 
                         let meta_info = format!(
-                            "{} (▶ {})",
+                            "{} (▶ {}) [{}]",
                             video.author,
-                            video.play.to_string().trim_matches('"')
+                            video.play.to_string().trim_matches('"'),
+                            video.duration
                         );
                         lines.push(Line::from(meta_info.italic().fg(Color::DarkGray)));
                         lines.push(Line::from(""));
