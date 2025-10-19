@@ -1,5 +1,55 @@
 use serde::Deserialize;
 
+struct BilibiliClient {
+    client: reqwest::Client,
+    sessdata: String,
+}
+
+impl BilibiliClient {
+    fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let sessdata = std::env::var("SESSDATA").unwrap_or_else(|_| "".to_string());
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            .build()?;
+
+        Ok(Self { client, sessdata })
+    }
+
+    async fn get_and_parse<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client
+            .get(url)
+            .header("Cookie", format!("SESSDATA={}", self.sessdata))
+            .send()
+            .await?;
+
+        let body_text = response.text().await?;
+        serde_json::from_str(&body_text).map_err(|e| {
+            format!("error decoding response body: {e}. Raw response: {body_text}")
+                .into()
+        })
+    }
+
+    async fn get_and_check<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self.client
+            .get(url)
+            .header("Cookie", format!("SESSDATA={}", self.sessdata))
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body_text = response.text().await?;
+
+        if !status.is_success() {
+            return Err(format!("HTTP error {}: {}. Response body: {}", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"), body_text).into());
+        }
+
+        serde_json::from_str(&body_text).map_err(|e| {
+            format!("error decoding response body: {e}. Raw response: {body_text}")
+                .into()
+        })
+    }
+}
+
 #[derive(Deserialize, Debug)]
 struct VideoInfoResponse {
     data: VideoInfo,
@@ -69,20 +119,8 @@ pub async fn search(keyword: &str) -> Result<Vec<VideoResult>, Box<dyn std::erro
         "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={}",
         keyword
     );
-    let cookie = std::env::var("BILI_COOKIE").unwrap_or_else(|_| "".to_string());
-    let client = reqwest::Client::builder().user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").build()?;
-    let response = client.get(&url).header("Cookie", cookie).send().await?;
-
-    let body_text = response.text().await?;
-    let response = match serde_json::from_str::<SearchResponse>(&body_text) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            return Err(format!(
-                "error decoding response body: {e}. Raw response: {body_text}"
-            )
-            .into());
-        }
-    };
+    let client = BilibiliClient::new()?;
+    let response: SearchResponse = client.get_and_parse(&url).await?;
 
     let mut videos = vec![];
     if let Some(results) = response.data.result {
@@ -99,21 +137,8 @@ pub async fn get_video_info(bvid: &str) -> Result<VideoInfo, Box<dyn std::error:
         "https://api.bilibili.com/x/web-interface/view?bvid={}",
         bvid
     );
-    let cookie = std::env::var("BILI_COOKIE").unwrap_or_else(|_| "".to_string());
-    let client = reqwest::Client::builder().user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").build()?;
-    let response = client.get(&url).header("Cookie", cookie).send().await?;
-
-    let body_text = response.text().await?;
-    let response: VideoInfoResponse = match serde_json::from_str(&body_text) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            return Err(format!(
-                "error decoding response body: {e}. Raw response: {body_text}"
-            )
-            .into());
-        }
-    };
-
+    let client = BilibiliClient::new()?;
+    let response: VideoInfoResponse = client.get_and_parse(&url).await?;
     Ok(response.data)
 }
 
@@ -152,65 +177,9 @@ struct MomentsData {
 
 
 pub async fn get_moments() -> Result<Vec<AuthorItem>, Box<dyn std::error::Error + Send + Sync>> {
-    let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist";
-
-    let sessdata = match std::env::var("SESSDATA") {
-        Ok(val) => {
-            if val.is_empty() {
-                return Err("SESSDATA environment variable is empty".into());
-            }
-            val
-        }
-        Err(e) => {
-            return Err(format!("Failed to read SESSDATA environment variable: {}", e).into());
-        }
-    };
-
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .build()?;
-
-    let response = client
-        .get(url)
-        .header("Cookie", format!("SESSDATA={}", sessdata))
-        .query(&[("teenagers_mode", "0")])
-        .send()
-        .await?;
-
-    let status = response.status();
-    let body_text = response.text().await?;
-
-    // Debug: write response to file for debugging
-    if let Ok(mut file) = std::fs::File::create("/tmp/moments_debug.txt") {
-        use std::io::Write;
-        let _ = file.write_all(b"=== MOMENTS API DEBUG ===\n");
-        let _ = file.write_all(format!("HTTP Status: {}\n", status).as_bytes());
-        let _ = file.write_all(format!("Response Length: {}\n", body_text.len()).as_bytes());
-        let _ = file.write_all(b"Response Body (first 1000 chars):\n");
-        let _ = file.write_all(&body_text[..body_text.len().min(1000)].as_bytes());
-        let _ = file.write_all(b"\n=== END DEBUG ===\n");
-    }
-
-    // First check HTTP status
-    if !status.is_success() {
-        return Err(format!("HTTP error {}: {}. Response body: {}", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"), body_text).into());
-    }
-
-    // Then parse JSON response
-    let api_response: MomentsResponse = match serde_json::from_str(&body_text) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            // Write full response to file for debugging
-            if let Ok(mut file) = std::fs::File::create("/tmp/moments_full_response.txt") {
-                use std::io::Write;
-                let _ = file.write_all(body_text.as_bytes());
-            }
-            return Err(format!(
-                "error decoding moments response: {e}. Full response written to /tmp/moments_full_response.txt"
-            )
-            .into());
-        }
-    };
+    let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
+    let client = BilibiliClient::new()?;
+    let api_response: MomentsResponse = client.get_and_check(url).await?;
 
     if api_response.code != 0 {
         return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
@@ -313,79 +282,32 @@ pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn s
         "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={}",
         uid
     );
-
-    let sessdata = match std::env::var("SESSDATA") {
-        Ok(val) => {
-            if val.is_empty() {
-                return Err("SESSDATA environment variable is empty".into());
-            }
-            val
-        }
-        Err(e) => {
-            return Err(format!("Failed to read SESSDATA environment variable: {}", e).into());
-        }
-    };
-
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .build()?;
-
-    let response = client
-        .get(&url)
-        .header("Cookie", format!("SESSDATA={}", sessdata))
-        .send()
-        .await?;
-
-    let status = response.status();
-    let body_text = response.text().await?;
-
-    if !status.is_success() {
-        return Err(format!("HTTP error {}: {}. Response body: {}", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"), body_text).into());
-    }
-
-    let api_response: SpaceDynamicResponse = match serde_json::from_str(&body_text) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            return Err(format!(
-                "error decoding space response: {e}. Response body: {body_text}"
-            )
-            .into());
-        }
-    };
+    let client = BilibiliClient::new()?;
+    let api_response: SpaceDynamicResponse = client.get_and_check(&url).await?;
 
     if api_response.code != 0 {
         return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
     }
 
-    let mut dynamics = vec![];
-    for item in api_response.data.items {
+    let dynamics: Vec<AuthorDynamic> = api_response.data.items.into_iter().map(|item| {
         let author = &item.modules.module_author;
         let dynamic_content = &item.modules.module_dynamic;
 
-        // Extract text content, fallback to empty string if not available
-        let content = if let Some(desc) = &dynamic_content.desc {
-            desc.text.clone()
-        } else {
-            String::new()
-        };
+        let content = dynamic_content.desc.as_ref()
+            .map(|desc| desc.text.clone())
+            .unwrap_or_default();
 
-        // Extract video info if available
-        let video_info = if let Some(major) = &dynamic_content.major {
-            major.archive.clone()
-        } else {
-            None
-        };
+        let video_info = dynamic_content.major.as_ref()
+            .and_then(|major| major.archive.clone());
 
-        let dynamic = AuthorDynamic {
+        AuthorDynamic {
             content,
             timestamp: author.pub_ts,
             author_name: author.name.clone(),
             stats: item.modules.module_stat,
             video_info,
-        };
-
-        dynamics.push(dynamic);
-    }
+        }
+    }).collect();
 
     Ok(dynamics)
 }

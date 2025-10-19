@@ -33,6 +33,11 @@ Ensure you have the following software installed on your system:
 
 To get better search results and video quality, you can provide your Bilibili SESSDATA via the `SESSDATA` environment variable.
 
+**How to get SESSDATA:**
+1. Log in to bilibili.com in your browser
+2. Open Developer Tools (F12) → Application tab → Cookies → https://bilibili.com
+3. Find the `SESSDATA` cookie and copy its value
+4. Set the environment variable:
 ```bash
 export SESSDATA="your_sessdata_value_here"
 ```
@@ -54,7 +59,8 @@ When into the command area:
 
 - `:video <url>`: Plays the specified Bilibili video URL.
 - `:video-info <url_or_bvid>`: Displays detailed information about the video (title, uploader, description, etc.).
+- :moments or m : get the moments of your followings.
 - `:help`: Shows the help screen.
 - `:q`: Quits the application.Or quit the enter.
 
-Also a quick search with `/` .
+Also a quick search with `/`  and quick moments with 'm'.

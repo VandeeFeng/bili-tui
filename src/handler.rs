@@ -5,6 +5,36 @@ use ratatui::crossterm::event::{KeyCode, KeyEventKind, Event};
 use std::io;
 use tui_input::backend::crossterm::EventHandler;
 
+// Common navigation pattern for list selection
+fn navigate_list(index: Option<usize>, len: usize, direction: bool) -> usize {
+    if len == 0 {
+        return 0;
+    }
+
+    let current = index.unwrap_or(0);
+    if direction { // Down/Next
+        if current >= len - 1 { 0 } else { current + 1 }
+    } else { // Up/Prev
+        if current == 0 { len - 1 } else { current - 1 }
+    }
+}
+
+// Handle common overlay keys (command, help, quit)
+fn handle_overlay_keys(app: &mut App, key: crossterm::event::KeyEvent) -> Option<bool> {
+    match key.code {
+        KeyCode::Char(':') => {
+            app.activate_command();
+            Some(false)
+        }
+        KeyCode::Char('?') => {
+            app.activate_help();
+            Some(false)
+        }
+        KeyCode::Char('q') | KeyCode::Esc => Some(true),
+        _ => None,
+    }
+}
+
 async fn fetch_author_dynamics(app: &mut App, uid: u64) {
     if app.loading_dynamics {
         return; // Already loading
@@ -99,22 +129,12 @@ async fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx:
 }
 
 fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
-    // Handle common keys first, but with custom quit behavior for editing mode
-    match key.code {
-        KeyCode::Char(':') => {
-            app.activate_command();
-            return Ok(());
-        }
-        KeyCode::Char('?') => {
-            app.activate_help();
-            return Ok(());
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
+    if let Some(should_quit) = handle_overlay_keys(app, key) {
+        if should_quit {
             app.mode = InputMode::Normal;
             app.focused_panel = Focusable::None;
-            return Ok(());
         }
-        _ => {}
+        return Ok(());
     }
 
     match key.code {
@@ -175,93 +195,45 @@ async fn handle_command_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
 }
 
 fn handle_detail_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
-    // Handle common keys first, but with custom quit behavior for detail mode
-    match key.code {
-        KeyCode::Char(':') => {
-            app.activate_command();
-            return Ok(());
-        }
-        KeyCode::Char('?') => {
-            app.activate_help();
-            return Ok(());
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
+    if let Some(should_quit) = handle_overlay_keys(app, key) {
+        if should_quit {
             app.mode = InputMode::Normal;
             app.focused_panel = Focusable::None;
             app.video_info = None;
-            return Ok(());
         }
-        _ => {}
+        return Ok(());
     }
 
     match key.code {
-        KeyCode::Char('j') => {
-            app.move_focus_next();
-        }
-        KeyCode::Char('k') => {
-            app.move_focus_prev();
-        }
+        KeyCode::Char('j') => app.move_focus_next(),
+        KeyCode::Char('k') => app.move_focus_prev(),
         KeyCode::Enter => if app.focused_panel == Focusable::Search {
             app.mode = InputMode::Editing;
         },
-        KeyCode::Char('p') => {
-            app.play_video();
-        }
+        KeyCode::Char('p') => app.play_video(),
         _ => {}
     }
     Ok(())
 }
 
 fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
-    // Handle common keys first, but with custom quit behavior for list nav mode
-    match key.code {
-        KeyCode::Char(':') => {
-            app.activate_command();
-            return Ok(());
-        }
-        KeyCode::Char('?') => {
-            app.activate_help();
-            return Ok(());
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
+    if let Some(should_quit) = handle_overlay_keys(app, key) {
+        if should_quit {
             app.mode = InputMode::Normal;
             app.results_list_state.select(None);
             app.focused_panel = Focusable::None;
-            return Ok(());
         }
-        _ => {}
+        return Ok(());
     }
 
     match key.code {
-        KeyCode::Char('j') => {
-            if !app.search_results.is_empty() {
-                let i = match app.results_list_state.selected() {
-                    Some(i) => {
-                        if i >= app.search_results.len() - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
-                    }
-                    None => 0,
-                };
-                app.results_list_state.select(Some(i));
-            }
+        KeyCode::Char('j') | KeyCode::Down => {
+            let i = navigate_list(app.results_list_state.selected(), app.search_results.len(), true);
+            app.results_list_state.select(Some(i));
         }
-        KeyCode::Char('k') => {
-            if !app.search_results.is_empty() {
-                let i = match app.results_list_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            app.search_results.len() - 1
-                        } else {
-                            i - 1
-                        }
-                    }
-                    None => 0,
-                };
-                app.results_list_state.select(Some(i));
-            }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let i = navigate_list(app.results_list_state.selected(), app.search_results.len(), false);
+            app.results_list_state.select(Some(i));
         }
         KeyCode::Enter => {
             app.mode = InputMode::Detail;
@@ -278,7 +250,6 @@ fn handle_help_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Resul
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.help_active = false;
-            // Don't change the current mode, just deactivate help
         }
         _ => {}
     }
@@ -286,91 +257,47 @@ fn handle_help_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Resul
 }
 
 async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
-    // Handle common keys first, but with custom quit behavior for moments mode
-    match key.code {
-        KeyCode::Char(':') => {
-            app.activate_command();
-            return Ok(());
-        }
-        KeyCode::Char('?') => {
-            app.activate_help();
-            return Ok(());
-        }
-        KeyCode::Char('q') | KeyCode::Esc => {
+    if let Some(should_quit) = handle_overlay_keys(app, key) {
+        if should_quit {
             app.mode = InputMode::Normal;
             app.moments_active = false;
             app.focused_panel = Focusable::None;
             app.selected_author.select(None);
-            return Ok(());
         }
-        _ => {}
+        return Ok(());
     }
 
     match key.code {
         KeyCode::Char('j') => {
             if app.focused_panel == Focusable::MomentsAuthors {
                 // Navigate down in authors list
-                if let Some(data) = &app.moments_data {
-                    if !data.is_empty() {
-                        let i = match app.selected_author.selected() {
-                            Some(i) => {
-                                if i >= data.len() - 1 {
-                                    0
-                                } else {
-                                    i + 1
-                                }
-                            }
-                            None => 0,
-                        };
-                        let _previous_index = app.selected_author.selected();
-                        app.selected_author.select(Some(i));
+                if let Some(data) = &app.moments_data && !data.is_empty() {
+                    let i = navigate_list(app.selected_author.selected(), data.len(), true);
+                    app.selected_author.select(Some(i));
 
-                        // Fetch dynamics for the newly selected author
-                        if let Some(data) = &app.moments_data {
-                            if let Some(author) = data.get(i) {
-                                let uid = author.user_profile.info.uid;
-                                fetch_author_dynamics(app, uid).await;
-                            }
-                        }
+                    if let Some(author) = data.get(i) {
+                        fetch_author_dynamics(app, author.user_profile.info.uid).await;
                     }
                 }
             } else if app.focused_panel == Focusable::MomentsContent {
                 // Scroll down in dynamics content
-                if let Some(dynamics) = &app.selected_author_dynamics {
-                    if app.dynamics_scroll_offset + 1 < dynamics.len() {
+                if let Some(dynamics) = &app.selected_author_dynamics
+                    && app.dynamics_scroll_offset + 1 < dynamics.len() {
                         app.dynamics_scroll_offset += 1;
                     }
-                }
             } else {
-                // Move focus to next panel
                 app.move_focus_next();
             }
         }
         KeyCode::Char('k') => {
             if app.focused_panel == Focusable::MomentsAuthors {
                 // Navigate up in authors list
-                if let Some(data) = &app.moments_data {
-                    if !data.is_empty() {
-                        let i = match app.selected_author.selected() {
-                            Some(i) => {
-                                if i == 0 {
-                                    data.len() - 1
-                                } else {
-                                    i - 1
-                                }
-                            }
-                            None => 0,
-                        };
-                        let _previous_index = app.selected_author.selected();
-                        app.selected_author.select(Some(i));
+                if let Some(data) = &app.moments_data && !data.is_empty() {
+                    let i = navigate_list(app.selected_author.selected(), data.len(), false);
+                    app.selected_author.select(Some(i));
 
-                        // Fetch dynamics for the newly selected author
-                        if let Some(data) = &app.moments_data {
-                            if let Some(author) = data.get(i) {
-                                let uid = author.user_profile.info.uid;
-                                fetch_author_dynamics(app, uid).await;
-                            }
-                        }
+                    if let Some(author) = data.get(i) {
+                        fetch_author_dynamics(app, author.user_profile.info.uid).await;
                     }
                 }
             } else if app.focused_panel == Focusable::MomentsContent {
@@ -379,7 +306,6 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
                     app.dynamics_scroll_offset -= 1;
                 }
             } else {
-                // Move focus to previous panel
                 app.move_focus_prev();
             }
         }
@@ -402,33 +328,18 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
             }
         }
         KeyCode::Up | KeyCode::Down => {
-            // Arrow keys also work for navigation in authors list
-            if app.focused_panel == Focusable::MomentsAuthors {
-                if let Some(data) = &app.moments_data && !data.is_empty() {
-                    let current = app.selected_author.selected().unwrap_or(0);
-                    let new_index = match key.code {
-                        KeyCode::Up => {
-                            if current == 0 { data.len() - 1 } else { current - 1 }
-                        }
-                        KeyCode::Down => {
-                            if current >= data.len() - 1 { 0 } else { current + 1 }
-                        }
-                        _ => current,
-                    };
+            if app.focused_panel == Focusable::MomentsAuthors
+                && let Some(data) = &app.moments_data && !data.is_empty() {
+                    let direction = matches!(key.code, KeyCode::Down);
+                    let new_index = navigate_list(app.selected_author.selected(), data.len(), direction);
                     let previous_index = app.selected_author.selected();
                     app.selected_author.select(Some(new_index));
 
-                    // Fetch dynamics for the newly selected author if different
-                    if previous_index != Some(new_index) {
-                        if let Some(data) = &app.moments_data {
-                            if let Some(author) = data.get(new_index) {
-                                let uid = author.user_profile.info.uid;
-                                fetch_author_dynamics(app, uid).await;
-                            }
+                    if previous_index != Some(new_index)
+                        && let Some(author) = data.get(new_index) {
+                            fetch_author_dynamics(app, author.user_profile.info.uid).await;
                         }
-                    }
                 }
-            }
         }
         KeyCode::Left | KeyCode::Right => {
             // Arrow keys for panel switching
@@ -440,12 +351,11 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
         }
         KeyCode::Enter => {
             // Load dynamics for selected author
-            if let (Some(data), Some(selected_index)) = (&app.moments_data, app.selected_author.selected()) {
-                if let Some(author) = data.get(selected_index) {
+            if let (Some(data), Some(selected_index)) = (&app.moments_data, app.selected_author.selected())
+                && let Some(author) = data.get(selected_index) {
                     let uid = author.user_profile.info.uid;
                     fetch_author_dynamics(app, uid).await;
                 }
-            }
         }
         _ => {}
     }

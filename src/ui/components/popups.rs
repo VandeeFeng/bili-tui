@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph};
 
 pub fn render_help_popup(f: &mut Frame, area: Rect) {
     let help_text = vec![
@@ -28,7 +28,7 @@ pub fn render_help_popup(f: &mut Frame, area: Rect) {
         Line::from("  q/Esc              - Exit moments mode"),
     ];
     let help_panel = Paragraph::new(help_text)
-        .block(Block::default().title("Help").borders(Borders::ALL));
+        .block(ratatui::widgets::Block::default().title("Help").borders(ratatui::widgets::Borders::ALL));
     f.render_widget(help_panel, area);
 }
 
