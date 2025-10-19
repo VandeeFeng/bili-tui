@@ -2,6 +2,13 @@
 name = "bili-tui"
 version = "0.1.0"
 edition = "2024"
+description = "A TUI client for Bilibili written in Rust."
+license = "MIT"
+repository = "https://github.com/vandeefeng/bili-tui"
+homepage = "https://github.com/vandeefeng/bili-tui"
+readme = "README.md"
+keywords = ["bilibili", "tui", "cli", "video", "terminal"]
+categories = ["command-line-utilities", "multimedia::video"]
 
 [dependencies]
 ratatui = { version = "0.29.0", features = ["all-widgets"] }

@@ -52,15 +52,30 @@ let response = client.get(&url).header("Cookie", format!("SESSDATA={}", sessdata
 
 **Security Warning**: Storing SESSDATA in environment variables can be a security risk on shared systems. Use with caution.
 
-## Commands
-Navigation with JK and enter.
+## Usage
 
-When into the command area:
+### Keybindings
+
+| Key(s) | Action |
+| --- | --- |
+| `q`, `Esc` | Quit or go back |
+| `j`, `↓` | Move down |
+| `k`, `↑` | Move up |
+| `h`, `←` | Move left (in Moments view) |
+| `l`, `→` | Move right (in Moments view) |
+| `J`, `Shift+↓` | Scroll content down (in Moments view) |
+| `K`, `Shift+↑` | Scroll content up (in Moments view) |
+| `p` | Play selected video (in Moments or Search Results) |
+| `Enter` | Activate/Select item |
+| `/` | Focus search bar |
+| `m` | Show Moments view |
+| `:` | Enter command mode |
+| `?` | Show help |
+
+### Commands (when in command mode)
 
 - `:video <url>`: Plays the specified Bilibili video URL.
-- `:video-info <url_or_bvid>`: Displays detailed information about the video (title, uploader, description, etc.).
-- :moments or m : get the moments of your followings.
+- `:video-info <url_or_bvid>`: Displays detailed information about the video.
+- `:moments or m`: Shows the moments of your followed authors.
 - `:help`: Shows the help screen.
-- `:q`: Quits the application.Or quit the enter.
-
-Also a quick search with `/`  and quick moments with 'm'.
+- `:q`: Quits the application.
