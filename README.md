@@ -18,19 +18,34 @@ Ensure you have the following software installed on your system:
 - **[mpv](https://mpv.io/)**: A powerful media player.
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**: A video downloader used to resolve video streams.
 
-## How to Run
+## Getting Started
 
-1.  **Clone the repository:**
+### From crates.io (Recommended)
+
+1.  Install the application using Cargo:
+    ```bash
+    cargo install bili-tui
+    ```
+    *Make sure `~/.cargo/bin` is in your system's `PATH`.*
+
+2.  Run the application:
+    ```bash
+    bili-tui
+    ```
+
+### From Source
+
+1.  Clone the repository:
     ```bash
     git clone https://github.com/vandeefeng/bili-tui.git
     cd bili-tui
     ```
 
-2.  **Run with Cargo:**
+2.  Run with Cargo:
     ```bash
     cargo run
     ```
-
+### SESSDATA
 To get better search results and video quality, you can provide your Bilibili SESSDATA via the `SESSDATA` environment variable.
 
 **How to get SESSDATA:**
