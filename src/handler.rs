@@ -52,6 +52,21 @@ fn handle_overlay_keys(app: &mut App, key: crossterm::event::KeyEvent) -> Option
     }
 }
 
+// Handle global shortcuts that work across all pages
+fn handle_global_shortcuts(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> Option<bool> {
+    match key.code {
+        // Global search shortcut - works on any page
+        KeyCode::Char('/') => {
+            app.focused_panel = Focusable::Search;
+            app.mode = InputMode::Editing;
+            Some(false)
+        }
+        // Other global shortcuts handled by page-specific handlers
+        // This includes 'm' for moments which is handled in each page handler
+        _ => None,
+    }
+}
+
 async fn fetch_author_dynamics(app: &mut App, uid: u64) {
     if app.loading_dynamics {
         return; // Already loading
@@ -86,30 +101,43 @@ pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx
         return handle_command_mode(app, key).await;
     }
 
-    // Handle help mode as overlay
+    // Handle global shortcuts first - they work even when help is active
+    if let Some(result) = handle_global_shortcuts(app, key, tx) {
+        return Ok(result);
+    }
+
+    // Handle help mode as overlay (but after global shortcuts)
     if app.help_active {
         return handle_help_mode(app, key);
     }
 
-    match app.mode {
-        InputMode::Normal => handle_normal_mode(app, key, tx).await?,
-        InputMode::Editing => handle_editing_mode(app, key, tx)?,
-        InputMode::Detail => handle_detail_mode(app, key)?,
-        InputMode::ListNav => handle_list_nav_mode(app, key)?,
-        InputMode::Moments => {
-            handle_moments_mode(app, key).await?;
-        },
+    // Handle editing mode (for search input)
+    if app.mode == InputMode::Editing {
+        return handle_editing_mode(app, key, tx).map(|_| false);
+    }
+
+    // Handle list navigation mode (for results list)
+    if app.mode == InputMode::ListNav {
+        return handle_list_nav_mode(app, key).map(|_| false);
+    }
+
+    // Delegate to current page
+    match app.active_page {
+        crate::app::ActivePage::Search => handle_search_page(app, key, tx).await?,
+        crate::app::ActivePage::Moments => handle_moments_page(app, key).await?,
+        crate::app::ActivePage::Detail => handle_detail_page(app, key).await?,
     }
 
     Ok(false)
 }
 
-async fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
+// Search page handler
+async fn handle_search_page(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
     // Handle common keys first
     match app.handle_common_keys(key) {
         CommonKeyResult::Handled => return Ok(()),
         CommonKeyResult::Quit => return Err(io::Error::other("quit")),
-        CommonKeyResult::Continue => {} // Continue to mode-specific handling
+        CommonKeyResult::Continue => {} // Continue to page-specific handling
     }
 
     match key.code {
@@ -126,15 +154,8 @@ async fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx:
             Focusable::Results => {
                 app.mode = InputMode::ListNav;
             }
-            Focusable::MomentsAuthors | Focusable::MomentsContent => {
-                // Do nothing in normal mode, moments mode handles this separately
-            }
-            Focusable::None => {}
+            _ => {}
         },
-        KeyCode::Char('/') => {
-            app.focused_panel = Focusable::Search;
-            app.mode = InputMode::Editing;
-        }
         KeyCode::Char('m') => {
             // Execute moments command as global shortcut
             let cmd = command::Command::ShowMoments;
@@ -145,11 +166,12 @@ async fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx:
     Ok(())
 }
 
+
 fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
     if let Some(should_quit) = handle_overlay_keys(app, key) {
         if should_quit {
             app.mode = InputMode::Normal;
-            app.focused_panel = Focusable::None;
+            app.focused_panel = Focusable::Search; // Return focus to search
         }
         return Ok(());
     }
@@ -166,6 +188,8 @@ fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &toki
                 let _ = tx.send(response).await;
             });
             app.mode = InputMode::Normal;
+            // Switch to search page to show results
+            app.active_page = crate::app::ActivePage::Search;
         }
         _ => {
             let ratatui_key = convert_key_event(key);
@@ -213,14 +237,19 @@ async fn handle_command_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
     Ok(false)
 }
 
-fn handle_detail_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
-    if let Some(should_quit) = handle_overlay_keys(app, key) {
-        if should_quit {
-            app.mode = InputMode::Normal;
-            app.focused_panel = Focusable::None;
+// Detail page handler
+async fn handle_detail_page(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
+    // Handle common keys first
+    match app.handle_common_keys(key) {
+        CommonKeyResult::Handled => return Ok(()),
+        CommonKeyResult::Quit => {
+            // Return to search page when quitting detail
+            app.active_page = crate::app::ActivePage::Search;
+            app.focused_panel = Focusable::Results;
             app.video_info = None;
-        }
-        return Ok(());
+            return Ok(());
+        },
+        CommonKeyResult::Continue => {} // Continue to page-specific handling
     }
 
     match key.code {
@@ -230,10 +259,16 @@ fn handle_detail_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Res
             app.mode = InputMode::Editing;
         },
         KeyCode::Char('p') => app.play_video(),
+        KeyCode::Char('m') => {
+            // Execute moments command
+            let cmd = command::Command::ShowMoments;
+            let _ = command::execute(cmd, app).await;
+        }
         _ => {}
     }
     Ok(())
 }
+
 
 fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
     if let Some(should_quit) = handle_overlay_keys(app, key) {
@@ -255,7 +290,34 @@ fn handle_list_nav_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::R
             app.results_list_state.select(Some(i));
         }
         KeyCode::Enter => {
-            app.mode = InputMode::Detail;
+            // Set video info and switch to detail page
+            if let Some(selected_index) = app.results_list_state.selected() {
+                if let Some(video) = app.search_results.get(selected_index) {
+                    // Store basic video info, will be fully loaded in detail page
+                    app.video_info = Some(crate::api::VideoInfo {
+                        bvid: video.bvid.clone(),
+                        title: video.title.clone(),
+                        desc: video.description.clone(),
+                        owner: crate::api::Owner {
+                            name: video.author.clone(),
+                        },
+                        stat: crate::api::Stat {
+                            view: 0, // Will be populated when fully loaded
+                            like: video.like,
+                            coin: 0,
+                            favorite: 0,
+                            share: 0,
+                        },
+                    });
+                }
+            }
+            app.active_page = crate::app::ActivePage::Detail;
+            app.mode = InputMode::Normal;
+        }
+        // Handle global shortcuts
+        KeyCode::Char('/') => {
+            app.mode = InputMode::Editing;
+            app.focused_panel = Focusable::Search;
         }
         _ => {}
     }
@@ -266,24 +328,42 @@ fn handle_help_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Resul
     match key.code {
         KeyCode::Char(':') => {
             app.activate_command();
+            Ok(false)
         }
         KeyCode::Char('q') | KeyCode::Esc => {
             app.help_active = false;
+            Ok(false)
         }
-        _ => {}
+        // Allow search shortcut even in help mode
+        KeyCode::Char('/') => {
+            app.help_active = false; // Close help first
+            app.focused_panel = Focusable::Search;
+            app.mode = InputMode::Editing;
+            Ok(false)
+        }
+        // Allow moments shortcut even in help mode
+        KeyCode::Char('m') => {
+            app.help_active = false; // Close help first
+            // Note: moments command will be handled by the page handlers after help closes
+            Ok(false)
+        }
+        _ => Ok(false),
     }
-    Ok(false)
 }
 
-async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
-    if let Some(should_quit) = handle_overlay_keys(app, key) {
-        if should_quit {
-            app.mode = InputMode::Normal;
-            app.moments_active = false;
-            app.focused_panel = Focusable::None;
+// Moments page handler
+async fn handle_moments_page(app: &mut App, key: crossterm::event::KeyEvent) -> io::Result<()> {
+    // Handle common keys first
+    match app.handle_common_keys(key) {
+        CommonKeyResult::Handled => return Ok(()),
+        CommonKeyResult::Quit => {
+            // Return to search page when quitting moments
+            app.active_page = crate::app::ActivePage::Search;
+            app.focused_panel = Focusable::Search;
             app.selected_author.select(None);
-        }
-        return Ok(());
+            return Ok(());
+        },
+        CommonKeyResult::Continue => {} // Continue to page-specific handling
     }
 
     match key.code {
@@ -329,7 +409,7 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
             }
         }
         KeyCode::Tab => {
-            // Legacy Tab key - switch between author and content panels
+            // Switch between author and content panels
             match app.focused_panel {
                 Focusable::MomentsAuthors => app.focused_panel = Focusable::MomentsContent,
                 Focusable::MomentsContent => app.focused_panel = Focusable::MomentsAuthors,
@@ -389,3 +469,4 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
     }
     Ok(())
 }
+

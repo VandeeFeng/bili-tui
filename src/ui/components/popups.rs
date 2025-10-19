@@ -3,33 +3,71 @@ use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
 use ratatui::widgets::{Clear, Paragraph};
 
-pub fn render_help_popup(f: &mut Frame, area: Rect) {
+pub fn render_help_popup(f: &mut Frame, app: &App) {
+    // Calculate popup area to occupy 70% of terminal
+    let popup_width = f.area().width * 70 / 100;
+    let popup_height = f.area().height * 70 / 100;
+    let popup_area = app.calculate_popup_area(f.area(), popup_width, popup_height);
+
+    // Clear the background area to create a clean overlay
+    f.render_widget(Clear, popup_area);
+
     let help_text = vec![
-        Line::from("Commands:".bold()),
+        Line::from("Bili-TUI - Bilibili Terminal UI Help".bold().cyan()),
+        Line::from(""),
+
+        Line::from("Global Shortcuts:".bold().yellow()),
+        Line::from("  /                  - Search (global shortcut)"),
+        Line::from("  m                  - Moments/Following updates"),
+        Line::from("  :                  - Command mode"),
+        Line::from("  ?                  - Show this help"),
+        Line::from("  q/Esc              - Exit current mode or quit"),
+        Line::from(""),
+
+        Line::from("Navigation:".bold().yellow()),
+        Line::from("  j/k                - Move focus between panels"),
+        Line::from("  h/l                - Switch panels (in Moments mode)"),
+        Line::from("  ←/→               - Switch panels (alternative)"),
+        Line::from("  Tab                - Legacy panel switching"),
+        Line::from("  Enter              - Activate/Select current panel"),
+        Line::from(""),
+
+        Line::from("Commands:".bold().yellow()),
         Line::from("  video <url>        - Play video with mpv"),
         Line::from("  video-info <url>   - Show video details"),
         Line::from("  moments (or m)     - Show following authors' updates"),
         Line::from("  help               - Show this help message"),
         Line::from("  q                  - Quit the application"),
         Line::from(""),
-        Line::from("Navigation:".bold()),
-        Line::from("  j/k                - Move focus between panels"),
-        Line::from("  /                  - Search"),
-        Line::from("  m                  - Moments (following authors)"),
-        Line::from("  Enter              - Select/Enter panel"),
-        Line::from("  q/Esc              - Exit current mode/panel"),
-        Line::from("  :                  - Open command popup"),
-        Line::from("  ?                  - Show help"),
+
+        Line::from("Search Mode:".bold().yellow()),
+        Line::from("  /                  - Start searching"),
+        Line::from("  Enter (editing)    - Execute search"),
+        Line::from("  ↓/j/k/↑           - Navigate results"),
+        Line::from("  Enter (results)    - View video details"),
         Line::from(""),
-        Line::from("Moments Mode:".bold()),
-        Line::from("  j/k                - Navigate authors list or scroll dynamics content"),
+
+        Line::from("Moments Mode:".bold().yellow()),
+        Line::from("  j/k                - Navigate authors or scroll content"),
         Line::from("  h/l                - Switch between author/content panels"),
-        Line::from("  Tab                - Legacy: switch between panels"),
+        Line::from("  Enter (authors)    - Load author's dynamics"),
+        Line::from("  ↓/↑               - Scroll dynamics content"),
         Line::from("  q/Esc              - Exit moments mode"),
+        Line::from(""),
+
+        Line::from("Detail View:".bold().yellow()),
+        Line::from("  p                  - Play current video"),
+        Line::from("  j/k                - Move focus between panels"),
+        Line::from("  q/Esc              - Return to search"),
+        Line::from(""),
+
+        Line::from("Press q/Esc to close help".italic().gray()),
     ];
+
     let help_panel = Paragraph::new(help_text)
-        .block(ratatui::widgets::Block::default().title("Help").borders(ratatui::widgets::Borders::ALL));
-    f.render_widget(help_panel, area);
+        .block(app.create_popup_block("Help", Color::Cyan))
+        .wrap(ratatui::widgets::Wrap { trim: true });
+    f.render_widget(help_panel, popup_area);
 }
 
 pub fn render_command_popup(f: &mut Frame, app: &mut App) {

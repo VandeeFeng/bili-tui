@@ -106,12 +106,20 @@ impl Focusable {
     }
 }
 
+// Page state - manages currently displayed page
+#[derive(PartialEq, Clone, Copy)]
+pub enum ActivePage {
+    Search,
+    Moments,
+    Detail,
+}
+
+// Input mode - handles current interaction method only
+#[derive(PartialEq)]
 pub enum InputMode {
     Normal,
     Editing,
-    Detail,
     ListNav,
-    Moments,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +139,7 @@ pub enum MessageLevel {
 pub struct App {
     pub search_input: Input,
     pub command_input: Input,
+    pub active_page: ActivePage,
     pub mode: InputMode,
     pub command_active: bool,
     pub help_active: bool,
@@ -142,7 +151,6 @@ pub struct App {
     pub messages: Vec<Message>,
     pub show_error_popup: bool,
     // Moments related fields
-    pub moments_active: bool,
     pub moments_data: Option<Vec<api::AuthorItem>>,
     pub selected_author: ListState,
     pub selected_author_dynamics: Option<Vec<api::AuthorDynamic>>,
@@ -155,6 +163,7 @@ impl App {
         Self {
             search_input: Input::default(),
             command_input: Input::default(),
+            active_page: ActivePage::Search,
             mode: InputMode::Normal,
             command_active: false,
             help_active: false,
@@ -166,7 +175,6 @@ impl App {
             messages: Vec::new(),
             show_error_popup: false,
             // Moments related fields
-            moments_active: false,
             moments_data: None,
             selected_author: ListState::default(),
             selected_author_dynamics: None,
@@ -241,6 +249,7 @@ impl App {
                         }
                         self.mode = InputMode::ListNav;
                         self.focused_panel = Focusable::Results;
+                        self.active_page = ActivePage::Search; // Ensure we're on search page
                         self.add_message("Search completed".to_string(), MessageLevel::Success);
                     }
                     Err(e) => {

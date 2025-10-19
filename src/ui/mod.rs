@@ -18,20 +18,21 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     render_search_panel(f, chunks[0], app);
 
-    if app.help_active {
-        render_help_popup(f, chunks[1]);
-    } else {
-        match app.mode {
-            crate::app::InputMode::Detail => {
-                render_video_details_panel(f, chunks[1], app);
-            }
-            crate::app::InputMode::Moments => {
-                render_moments_panel(f, chunks[1], app);
-            }
-            _ => {
-                render_results_panel(f, chunks[1], app);
-            }
+    match app.active_page {
+        crate::app::ActivePage::Detail => {
+            render_video_details_panel(f, chunks[1], app);
         }
+        crate::app::ActivePage::Moments => {
+            render_moments_panel(f, chunks[1], app);
+        }
+        crate::app::ActivePage::Search => {
+            render_results_panel(f, chunks[1], app);
+        }
+    }
+
+    // Render help popup if active
+    if app.help_active {
+        render_help_popup(f, app);
     }
 
     // Render command popup if active
