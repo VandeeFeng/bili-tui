@@ -21,7 +21,7 @@ pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx
 
 impl NavigationHandler for App {
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<bool> {
-        use crossterm::event::{KeyCode, KeyEventKind};
+        use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
         if key.kind != KeyEventKind::Press {
             return Ok(false);
@@ -49,13 +49,15 @@ impl NavigationHandler for App {
             KeyCode::Char('q') | KeyCode::Esc => NavigationAction::Exit,
             KeyCode::Char('j') if self.can_navigate_panels() => NavigationAction::PanelNext,
             KeyCode::Char('k') if self.can_navigate_panels() => NavigationAction::PanelPrev,
+            // Content scrolling in Moments view (specific)
+            KeyCode::Up if key.modifiers == KeyModifiers::SHIFT && self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
+            KeyCode::Down if key.modifiers == KeyModifiers::SHIFT && self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
+            KeyCode::Char('K') if self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
+            KeyCode::Char('J') if self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
+
+            // List navigation (general)
             KeyCode::Char('j') | KeyCode::Down if self.can_navigate_list() => NavigationAction::ListDown,
             KeyCode::Char('k') | KeyCode::Up if self.can_navigate_list() => NavigationAction::ListUp,
-            // Z/X keys for content scrolling (only in moments content panel)
-            KeyCode::Char('z') if self.navigation.current_page == ActivePage::Moments
-                && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
-            KeyCode::Char('x') if self.navigation.current_page == ActivePage::Moments
-                && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
             KeyCode::Enter => NavigationAction::Activate,
             KeyCode::Char('/') => {
                 self.set_focused_panel(Focusable::Search);

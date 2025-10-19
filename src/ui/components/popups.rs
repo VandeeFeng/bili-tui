@@ -48,10 +48,11 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from(""),
 
         Line::from("Moments Mode:".bold().yellow()),
-        Line::from("  j/k                - Navigate authors or scroll content"),
+        Line::from("  j/k / ↑/↓          - Navigate authors or dynamics list (selection)"),
         Line::from("  h/l                - Switch between author/content panels"),
+        Line::from("  Shift+J/K / Shift+↑/↓ - Scroll dynamics content view"),
         Line::from("  Enter (authors)    - Load author's dynamics"),
-        Line::from("  ↓/↑               - Scroll dynamics content"),
+        Line::from("  p                  - Play selected dynamic video"),
         Line::from("  q/Esc              - Exit moments mode"),
         Line::from(""),
 
