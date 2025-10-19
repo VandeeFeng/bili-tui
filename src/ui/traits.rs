@@ -55,8 +55,8 @@ impl WidgetRenderer for App {
 impl MessageRenderer for App {
     fn get_message_style(&self, level: &MessageLevel) -> Style {
         match level {
-            MessageLevel::Info => Style::default().fg(Color::Blue),
-            MessageLevel::Success => Style::default().fg(Color::Green),
+            MessageLevel::Info => Style::default().fg(Color::Yellow),
+            MessageLevel::Success => Style::default().fg(Color::Yellow),
             MessageLevel::Warning => Style::default().fg(Color::Yellow),
             MessageLevel::Error => Style::default().fg(Color::Red),
         }

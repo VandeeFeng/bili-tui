@@ -2,7 +2,7 @@ use crate::api;
 use crate::handler::handle_key_event;
 use crate::terminal;
 use crate::ui;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
 use std::{error::Error, io, time::Duration};
 use tui_input::Input;
@@ -14,75 +14,49 @@ pub enum Focusable {
     Results,
     MomentsAuthors,
     MomentsContent,
-    None,
 }
 
-/// Trait for handling common keyboard event patterns across different modes
-pub trait StateHandler {
-    /// Handle common navigation keys (j/k, :, ?, q/Esc)
-    fn handle_common_keys(&mut self, key: crossterm::event::KeyEvent) -> CommonKeyResult;
-
-    /// Toggle command mode
-    fn activate_command(&mut self);
-
-    /// Toggle help mode
-    fn activate_help(&mut self);
+/// Unified navigation actions
+#[derive(PartialEq, Clone, Copy)]
+pub enum NavigationAction {
+    PanelNext,
+    PanelPrev,
+    ListUp,
+    ListDown,
+    Activate,
+    Exit,
+    ToggleCommand,
+    ToggleHelp,
+    PanelLeft,
+    PanelRight,
 }
 
-/// Result of handling common keys
+/// Result of handling navigation actions
 #[derive(Debug, PartialEq)]
-pub enum CommonKeyResult {
-    /// Key was handled as a common action
+pub enum NavigationResult {
+    /// Action was handled
     Handled,
-    /// Key should be processed by mode-specific logic
-    Continue,
-    /// Application should quit
+    /// Should quit application
     Quit,
+    /// Continue with normal processing
+    Continue,
 }
 
-impl StateHandler for App {
-    fn handle_common_keys(&mut self, key: crossterm::event::KeyEvent) -> CommonKeyResult {
-        match key.code {
-            KeyCode::Char(':') => {
-                self.activate_command();
-                CommonKeyResult::Handled
-            }
-            KeyCode::Char('?') => {
-                self.activate_help();
-                CommonKeyResult::Handled
-            }
-            KeyCode::Char('q') | KeyCode::Esc => {
-                CommonKeyResult::Quit
-            }
-            _ => CommonKeyResult::Continue,
-        }
-    }
+/// Unified navigation handler for all keyboard and UI interactions
+pub trait NavigationHandler {
+    /// Handle all keyboard events
+    async fn handle_key(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<bool>;
 
-    fn activate_command(&mut self) {
-        self.command_active = true;
-        self.command_input.reset();
-    }
+    /// Execute navigation action
+    fn execute_navigation(&mut self, action: NavigationAction) -> NavigationResult;
 
-    fn activate_help(&mut self) {
-        self.help_active = true;
-    }
+    /// Check if panel navigation is allowed
+    fn can_navigate_panels(&self) -> bool;
+
+    /// Check if list navigation is allowed
+    fn can_navigate_list(&self) -> bool;
 }
 
-/// Trait for focus navigation
-pub trait FocusNavigation {
-    fn move_focus_next(&mut self);
-    fn move_focus_prev(&mut self);
-}
-
-impl FocusNavigation for App {
-    fn move_focus_next(&mut self) {
-        self.focused_panel = self.focused_panel.next();
-    }
-
-    fn move_focus_prev(&mut self) {
-        self.focused_panel = self.focused_panel.prev();
-    }
-}
 
 impl Focusable {
     pub fn next(self) -> Self {
@@ -91,7 +65,6 @@ impl Focusable {
             Self::Results => Self::MomentsAuthors,
             Self::MomentsAuthors => Self::MomentsContent,
             Self::MomentsContent => Self::Search,
-            Self::None => Self::Search,
         }
     }
 
@@ -101,10 +74,11 @@ impl Focusable {
             Self::Results => Self::Search,
             Self::MomentsAuthors => Self::Results,
             Self::MomentsContent => Self::MomentsAuthors,
-            Self::None => Self::Results,
         }
     }
 }
+
+
 
 // Page state - manages currently displayed page
 #[derive(PartialEq, Clone, Copy)]
@@ -115,11 +89,45 @@ pub enum ActivePage {
 }
 
 // Input mode - handles current interaction method only
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub enum InputMode {
     Normal,
     Editing,
     ListNav,
+}
+
+// Unified overlay state management
+#[derive(PartialEq, Clone)]
+pub struct OverlayState {
+    pub command: bool,
+    pub help: bool,
+}
+
+impl OverlayState {
+    pub fn new() -> Self {
+        Self {
+            command: false,
+            help: false,
+        }
+    }
+}
+
+// Unified navigation state
+#[derive(PartialEq, Clone)]
+pub struct NavigationState {
+    pub current_page: ActivePage,
+    pub input_mode: InputMode,
+    pub focused_panel: Focusable,
+}
+
+impl NavigationState {
+    pub fn new() -> Self {
+        Self {
+            current_page: ActivePage::Search,
+            input_mode: InputMode::Normal,
+            focused_panel: Focusable::Search,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -137,19 +145,22 @@ pub enum MessageLevel {
 }
 
 pub struct App {
+    // Input fields
     pub search_input: Input,
     pub command_input: Input,
-    pub active_page: ActivePage,
-    pub mode: InputMode,
-    pub command_active: bool,
-    pub help_active: bool,
-    pub focused_panel: Focusable,
+
+    // State management
+    pub navigation: NavigationState,
+    pub overlays: OverlayState,
+
+    // Data
     pub search_results: Vec<api::VideoResult>,
     pub results_list_state: ListState,
     pub video_info: Option<api::VideoInfo>,
     pub last_error: Option<String>,
     pub messages: Vec<Message>,
     pub show_error_popup: bool,
+
     // Moments related fields
     pub moments_data: Option<Vec<api::AuthorItem>>,
     pub selected_author: ListState,
@@ -159,15 +170,13 @@ pub struct App {
 }
 
 impl App {
+
     pub fn new() -> Self {
         Self {
             search_input: Input::default(),
             command_input: Input::default(),
-            active_page: ActivePage::Search,
-            mode: InputMode::Normal,
-            command_active: false,
-            help_active: false,
-            focused_panel: Focusable::Search,
+            navigation: NavigationState::new(),
+            overlays: OverlayState::new(),
             search_results: Vec::new(),
             results_list_state: ListState::default(),
             video_info: None,
@@ -200,11 +209,35 @@ impl App {
     }
 
     pub fn is_editing(&self) -> bool {
-        matches!(self.mode, InputMode::Editing)
+        matches!(self.navigation.input_mode, InputMode::Editing)
     }
 
     pub fn is_commanding(&self) -> bool {
-        self.command_active
+        self.overlays.command
+    }
+
+    pub fn active_page(&self) -> ActivePage {
+        self.navigation.current_page
+    }
+
+    pub fn focused_panel(&self) -> Focusable {
+        self.navigation.focused_panel
+    }
+
+    pub fn input_mode(&self) -> InputMode {
+        self.navigation.input_mode.clone()
+    }
+
+    pub fn set_active_page(&mut self, page: ActivePage) {
+        self.navigation.current_page = page;
+    }
+
+    pub fn set_focused_panel(&mut self, panel: Focusable) {
+        self.navigation.focused_panel = panel;
+    }
+
+    pub fn set_input_mode(&mut self, mode: InputMode) {
+        self.navigation.input_mode = mode;
     }
 
     pub fn play_video(&mut self) {
@@ -247,9 +280,9 @@ impl App {
                         if !self.search_results.is_empty() {
                             self.results_list_state.select(Some(0));
                         }
-                        self.mode = InputMode::ListNav;
-                        self.focused_panel = Focusable::Results;
-                        self.active_page = ActivePage::Search; // Ensure we're on search page
+                        self.set_input_mode(InputMode::ListNav);
+                        self.set_focused_panel(Focusable::Results);
+                        self.set_active_page(ActivePage::Search); // Ensure we're on search page
                         self.add_message("Search completed".to_string(), MessageLevel::Success);
                     }
                     Err(e) => {

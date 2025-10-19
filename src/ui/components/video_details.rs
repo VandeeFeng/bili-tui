@@ -46,7 +46,7 @@ pub fn render_video_details_panel(f: &mut Frame, area: Rect, app: &App) {
     } else {
         vec![]
     };
-    let details_focused = app.focused_panel == Focusable::Results;
+    let details_focused = app.focused_panel() == Focusable::Results;
     let info_panel = Paragraph::new(detail_text)
         .wrap(ratatui::widgets::Wrap { trim: true })
         .block(app.create_focused_block("Video Details", details_focused));

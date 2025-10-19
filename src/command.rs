@@ -87,6 +87,7 @@ async fn fetch_first_author_dynamics(app: &mut App) {
     app.loading_dynamics = false;
 }
 
+
 pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
     match command {
         Command::PlayUrl(url) => {
@@ -103,8 +104,8 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 match api::get_video_info(&bvid).await {
                     Ok(info) => {
                         app.video_info = Some(info);
-                        app.active_page = crate::app::ActivePage::Detail;
-                        app.mode = crate::app::InputMode::Normal;
+                        app.set_active_page(crate::app::ActivePage::Detail);
+                        app.set_input_mode(crate::app::InputMode::Normal);
                         Ok(())
                     }
                     Err(e) => Err(e.to_string()),
@@ -120,9 +121,9 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 Ok(authors) => {
                     let count = authors.len();
                     app.moments_data = Some(authors);
-                    app.active_page = crate::app::ActivePage::Moments;
-                    app.mode = crate::app::InputMode::Normal;
-                    app.focused_panel = crate::app::Focusable::MomentsAuthors;
+                    app.set_active_page(crate::app::ActivePage::Moments);
+                    app.set_input_mode(crate::app::InputMode::Normal);
+                    app.set_focused_panel(crate::app::Focusable::MomentsAuthors);
 
                     if !app.moments_data.as_ref().unwrap().is_empty() {
                         app.selected_author.select(Some(0));
@@ -145,7 +146,7 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
         }
         Command::Help => {
-            app.help_active = true;
+            app.overlays.help = true;
             Ok(())
         }
         Command::Quit => {

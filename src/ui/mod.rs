@@ -18,7 +18,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     render_search_panel(f, chunks[0], app);
 
-    match app.active_page {
+    match app.active_page() {
         crate::app::ActivePage::Detail => {
             render_video_details_panel(f, chunks[1], app);
         }
@@ -31,7 +31,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     }
 
     // Render help popup if active
-    if app.help_active {
+    if app.overlays.help {
         render_help_popup(f, app);
     }
 
