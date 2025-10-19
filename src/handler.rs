@@ -358,7 +358,16 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
                         && let Some(author) = data.get(new_index) {
                             fetch_author_dynamics(app, author.user_profile.info.uid).await;
                         }
+                } else if app.focused_panel == Focusable::MomentsContent {
+                // Handle up/down arrows for scrolling in content panel
+                if let Some(dynamics) = &app.selected_author_dynamics {
+                    if key.code == KeyCode::Down && app.dynamics_scroll_offset + 1 < dynamics.len() {
+                        app.dynamics_scroll_offset += 1;
+                    } else if key.code == KeyCode::Up && app.dynamics_scroll_offset > 0 {
+                        app.dynamics_scroll_offset -= 1;
+                    }
                 }
+            }
         }
         KeyCode::Left | KeyCode::Right => {
             // Arrow keys for panel switching
