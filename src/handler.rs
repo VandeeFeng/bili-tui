@@ -160,29 +160,33 @@ impl App {
                         // Load dynamics for selected author
                         if let Some(author) = data.get(new_index) {
                             let uid = author.user_profile.info.uid;
-                            self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
-                            self.loading_dynamics = true;
-                            self.selected_author_dynamics = None;
-                            self.dynamics_scroll_offset = 0;
 
-                            // Simple synchronous loading for now - this blocks but works
-                            match std::thread::spawn(move || {
-                                tokio::runtime::Runtime::new()
-                                    .unwrap()
-                                    .block_on(crate::api::get_user_dynamics(uid))
-                            }).join().unwrap() {
-                                Ok(dynamics) => {
-                                    let count = dynamics.len();
-                                    self.selected_author_dynamics = Some(dynamics);
-                                    self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
-                                }
-                                Err(e) => {
-                                    self.add_message(format!("Failed to load dynamics: {}", e), MessageLevel::Error);
-                                    self.selected_author_dynamics = None;
+                            // Check cache first
+                            if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
+                                self.selected_author_dynamics = Some(cached_dynamics.clone());
+                                self.dynamics_scroll_offset = 0;
+                                self.add_message(format!("Loaded {} dynamics from cache", cached_dynamics.len()), MessageLevel::Info);
+                            } else {
+                                self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
+                                self.loading_dynamics = true;
+                                self.selected_author_dynamics = None;
+                                self.dynamics_scroll_offset = 0;
+
+                                // Start async loading
+                                if let Some(ref tx) = self.dynamics_tx {
+                                    let tx = tx.clone();
+                                    tokio::spawn(async move {
+                                        match crate::api::get_user_dynamics(uid).await {
+                                            Ok(dynamics) => {
+                                                let _ = tx.send((uid, dynamics)).await;
+                                            }
+                                            Err(_) => {
+                                                // Could send error message through another channel if needed
+                                            }
+                                        }
+                                    });
                                 }
                             }
-
-                            self.loading_dynamics = false;
                         }
                     }
                 } else if self.navigation.focused_panel == Focusable::MomentsContent {

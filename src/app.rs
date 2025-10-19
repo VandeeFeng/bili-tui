@@ -4,7 +4,7 @@ use crate::terminal;
 use crate::ui;
 use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
-use std::{error::Error, io, time::Duration};
+use std::{collections::HashMap, error::Error, io, time::Duration};
 use tui_input::Input;
 use tokio::sync::mpsc;
 
@@ -167,11 +167,17 @@ pub struct App {
     pub selected_author_dynamics: Option<Vec<api::AuthorDynamic>>,
     pub loading_dynamics: bool,
     pub dynamics_scroll_offset: usize,
+    // Cache for author dynamics to avoid repeated API calls
+    pub author_dynamics_cache: HashMap<u64, Vec<api::AuthorDynamic>>,
+    // Channel to handle async dynamics loading
+    pub dynamics_tx: Option<tokio::sync::mpsc::Sender<(u64, Vec<api::AuthorDynamic>)>>,
+    pub dynamics_rx: Option<tokio::sync::mpsc::Receiver<(u64, Vec<api::AuthorDynamic>)>>,
 }
 
 impl App {
 
     pub fn new() -> Self {
+        let (dynamics_tx, dynamics_rx) = tokio::sync::mpsc::channel(32);
         Self {
             search_input: Input::default(),
             command_input: Input::default(),
@@ -189,6 +195,9 @@ impl App {
             selected_author_dynamics: None,
             loading_dynamics: false,
             dynamics_scroll_offset: 0,
+            author_dynamics_cache: HashMap::new(),
+            dynamics_tx: Some(dynamics_tx),
+            dynamics_rx: Some(dynamics_rx),
         }
     }
 
@@ -287,6 +296,28 @@ impl App {
                     }
                     Err(e) => {
                         self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
+                    }
+                }
+            }
+
+            // Check for dynamics loading responses
+            if let Some(ref mut dynamics_rx) = self.dynamics_rx {
+                if let Ok((uid, dynamics)) = dynamics_rx.try_recv() {
+                    let count = dynamics.len();
+                    self.author_dynamics_cache.insert(uid, dynamics.clone());
+
+                    // Update UI if this is the currently selected author
+                    if let Some(selected_index) = self.selected_author.selected() {
+                        if let Some(ref data) = self.moments_data {
+                            if let Some(author) = data.get(selected_index) {
+                                if author.user_profile.info.uid == uid {
+                                    self.selected_author_dynamics = Some(dynamics);
+                                    self.loading_dynamics = false;
+                                    self.dynamics_scroll_offset = 0;
+                                    self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
+                                }
+                            }
+                        }
                     }
                 }
             }
