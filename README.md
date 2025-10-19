@@ -31,21 +31,21 @@ Ensure you have the following software installed on your system:
     cargo run
     ```
 
-To get better search results and video quality, you can provide your Bilibili cookie via the `BILI_COOKIE` environment variable.
+To get better search results and video quality, you can provide your Bilibili SESSDATA via the `SESSDATA` environment variable.
 
 ```bash
-export BILI_COOKIE="your_cookie_value_here"
+export SESSDATA="your_sessdata_value_here"
 ```
 
-The application reads this variable and adds the cookie to its API requests in `src/api.rs`:
+The application reads this variable and adds the SESSDATA to its API requests in `src/api.rs`:
 ```rust
 // src/api.rs
-let cookie = std::env::var("BILI_COOKIE").unwrap_or_else(|_| "".to_string());
+let sessdata = std::env::var("SESSDATA").unwrap_or_else(|_| "".to_string());
 // ...
-let response = client.get(&url).header("Cookie", cookie).send().await?;
+let response = client.get(&url).header("Cookie", format!("SESSDATA={}", sessdata)).send().await?;
 ```
 
-**Security Warning**: Storing cookies in environment variables can be a security risk on shared systems. Use with caution.
+**Security Warning**: Storing SESSDATA in environment variables can be a security risk on shared systems. Use with caution.
 
 ## Commands
 Navigation with JK and enter.
