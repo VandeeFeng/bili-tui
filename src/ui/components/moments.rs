@@ -1,5 +1,4 @@
 use crate::app::{App, Focusable};
-use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
 use ratatui::widgets::{List, ListItem, Paragraph};
 
@@ -12,12 +11,19 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Left panel: Authors list
     let authors: Vec<ListItem> = if let Some(data) = &app.moments_data {
-        data.iter().map(|author| {
+        data.iter().enumerate().map(|(index, author)| {
             let author_name = &author.user_profile.info.uname;
             let uid = author.user_profile.info.uid;
 
+            // Check if this author is selected
+            let is_selected = app.selected_author.selected().map_or(false, |selected| selected == index);
+
             ListItem::new(Line::from(vec![
-                Span::raw(author_name.clone()),
+                if is_selected {
+                    Span::styled(author_name.clone(), Style::default().fg(Color::Green))
+                } else {
+                    Span::raw(author_name.clone())
+                },
                 Span::from(" ").fg(Color::DarkGray),
                 Span::raw(format!("(UID: {})", uid)).fg(Color::DarkGray),
             ]))
@@ -26,10 +32,26 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
         vec![ListItem::new("No data available")]
     };
 
-    let authors_focused = app.focused_panel == Focusable::MomentsAuthors;
+    let authors_focused = app.focused_panel() == Focusable::MomentsAuthors;
+    let is_list_nav = app.input_mode() == crate::app::InputMode::ListNav;
+
+    // Calculate block color based on focus and mode
+    let block_color = if authors_focused && is_list_nav {
+        Color::Cyan
+    } else if authors_focused {
+        Color::Green
+    } else {
+        Color::Reset
+    };
+
     let authors_list = List::new(authors)
-        .block(app.create_focused_block("Following Authors", authors_focused))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Green))
+        .block(
+            ratatui::widgets::Block::default()
+                .title("Following Authors")
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(Style::default().fg(block_color))
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
     f.render_stateful_widget(authors_list, moments_chunks[0], &mut app.selected_author);
 
@@ -162,9 +184,25 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
         vec![Line::from("No data available")]
     };
 
-    let content_focused = app.focused_panel == Focusable::MomentsContent;
+    let content_focused = app.focused_panel() == Focusable::MomentsContent;
+    let is_list_nav = app.input_mode() == crate::app::InputMode::ListNav;
+
+    // Calculate block color based on focus and mode
+    let block_color = if content_focused && is_list_nav {
+        Color::Cyan
+    } else if content_focused {
+        Color::Green
+    } else {
+        Color::Reset  // Use default color instead of White
+    };
+
     let content_panel = Paragraph::new(selected_author_content)
         .wrap(ratatui::widgets::Wrap { trim: true })
-        .block(app.create_focused_block("Author Details & Dynamics", content_focused));
+        .block(
+            ratatui::widgets::Block::default()
+                .title("Author Details & Dynamics")
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(Style::default().fg(block_color))
+        );
     f.render_widget(content_panel, moments_chunks[1]);
 }

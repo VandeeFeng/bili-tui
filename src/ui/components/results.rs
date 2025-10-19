@@ -1,5 +1,4 @@
 use crate::app::{App, Focusable};
-use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
 use ratatui::widgets::{List, ListItem};
 
@@ -7,7 +6,8 @@ pub fn render_results_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let results: Vec<ListItem> = app
         .search_results
         .iter()
-        .map(|video| {
+        .enumerate()
+        .map(|(index, video)| {
             let text_width = area.width.saturating_sub(6) as usize;
             let options = textwrap::Options::new(text_width)
                 .initial_indent("")
@@ -15,9 +15,18 @@ pub fn render_results_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
             let title_wrapped = textwrap::wrap(&video.title, options);
 
+            // Check if this item is selected
+            let is_selected = app.results_list_state.selected().map_or(false, |selected| selected == index);
+
             let mut lines: Vec<Line> = title_wrapped
                 .iter()
-                .map(|s| Line::from(s.to_string()))
+                .map(|s| {
+                    if is_selected {
+                        Line::from(s.to_string().fg(Color::Green))
+                    } else {
+                        Line::from(s.to_string())
+                    }
+                })
                 .collect();
 
             let meta_info = format!(
@@ -33,9 +42,25 @@ pub fn render_results_panel(f: &mut Frame, area: Rect, app: &mut App) {
         })
         .collect();
 
-    let results_focused = app.focused_panel == Focusable::Results;
+    let results_focused = app.focused_panel() == Focusable::Results;
+    let is_list_nav = app.input_mode() == crate::app::InputMode::ListNav;
+
+    // Calculate block color based on focus and mode
+    let block_color = if results_focused && is_list_nav {
+        Color::Cyan
+    } else if results_focused {
+        Color::Green
+    } else {
+        Color::Reset
+    };
+
     let results_list = List::new(results)
-        .block(app.create_focused_block("Results", results_focused))
+        .block(
+            ratatui::widgets::Block::default()
+                .title("Results")
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(Style::default().fg(block_color))
+        )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
 
