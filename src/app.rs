@@ -2,7 +2,7 @@ use crate::api;
 use crate::handler::handle_key_event;
 use crate::terminal;
 use crate::ui;
-use crossterm::event::{self, Event, KeyCode};
+use ratatui::crossterm::event::{self, Event, KeyCode};
 use ratatui::widgets::ListState;
 use std::{error::Error, io, time::Duration};
 use tui_input::Input;
@@ -12,6 +12,8 @@ use tokio::sync::mpsc;
 pub enum Focusable {
     Search,
     Results,
+    MomentsAuthors,
+    MomentsContent,
     None,
 }
 
@@ -86,15 +88,19 @@ impl Focusable {
     pub fn next(self) -> Self {
         match self {
             Self::Search => Self::Results,
-            Self::Results => Self::Search,
+            Self::Results => Self::MomentsAuthors,
+            Self::MomentsAuthors => Self::MomentsContent,
+            Self::MomentsContent => Self::Search,
             Self::None => Self::Search,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Search => Self::Results,
+            Self::Search => Self::MomentsContent,
             Self::Results => Self::Search,
+            Self::MomentsAuthors => Self::Results,
+            Self::MomentsContent => Self::MomentsAuthors,
             Self::None => Self::Results,
         }
     }
@@ -105,6 +111,7 @@ pub enum InputMode {
     Editing,
     Detail,
     ListNav,
+    Moments,
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +141,12 @@ pub struct App {
     pub last_error: Option<String>,
     pub messages: Vec<Message>,
     pub show_error_popup: bool,
+    // Moments related fields
+    pub moments_active: bool,
+    pub moments_data: Option<Vec<api::AuthorItem>>,
+    pub selected_author: ListState,
+    pub selected_author_dynamics: Option<Vec<api::AuthorDynamic>>,
+    pub loading_dynamics: bool,
 }
 
 impl App {
@@ -151,6 +164,12 @@ impl App {
             last_error: None,
             messages: Vec::new(),
             show_error_popup: false,
+            // Moments related fields
+            moments_active: false,
+            moments_data: None,
+            selected_author: ListState::default(),
+            selected_author_dynamics: None,
+            loading_dynamics: false,
         }
     }
 
