@@ -14,7 +14,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             Constraint::Min(0),        // Main content area
             Constraint::Length(3),     // Message bar
         ])
-        .split(f.size());
+        .split(f.area());
 
     render_search_panel(f, chunks[0], app);
 

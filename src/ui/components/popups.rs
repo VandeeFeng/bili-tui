@@ -33,7 +33,7 @@ pub fn render_help_popup(f: &mut Frame, area: Rect) {
 }
 
 pub fn render_command_popup(f: &mut Frame, app: &mut App) {
-    let popup_area = app.calculate_popup_area(f.size(), 60, 3);
+    let popup_area = app.calculate_popup_area(f.area(), 60, 3);
 
     // Clear the background area to create a clean background
     f.render_widget(Clear, popup_area);
@@ -42,15 +42,17 @@ pub fn render_command_popup(f: &mut Frame, app: &mut App) {
         .block(app.create_popup_block("Command", Color::Green));
     f.render_widget(command_popup, popup_area);
 
-    f.set_cursor(
-        popup_area.x + app.command_input.visual_cursor() as u16 + 1,
-        popup_area.y + 1,
+    f.set_cursor_position(
+        (
+            popup_area.x + app.command_input.visual_cursor() as u16 + 1,
+            popup_area.y + 1,
+        )
     );
 }
 
 pub fn render_error_popup(f: &mut Frame, app: &App) {
     if let Some(error) = &app.last_error {
-        let popup_area = app.calculate_popup_area(f.size(), 60, 3);
+        let popup_area = app.calculate_popup_area(f.area(), 60, 3);
 
         let error_popup = Paragraph::new(error.as_str())
             .block(app.create_popup_block("Error", Color::Red));

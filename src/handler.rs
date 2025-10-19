@@ -1,9 +1,26 @@
 use crate::app::{App, Focusable, InputMode, StateHandler, FocusNavigation, CommonKeyResult};
 use crate::command;
 use crate::api;
-use ratatui::crossterm::event::{KeyCode, KeyEventKind, Event};
+use crossterm::event::{KeyCode, KeyEventKind, KeyEvent as CrosstermKeyEvent};
+use ratatui::crossterm::event::{Event, KeyEvent as RatatuiKeyEvent, KeyEventKind as RatatuiKeyEventKind};
 use std::io;
 use tui_input::backend::crossterm::EventHandler;
+
+// Convert crossterm event to ratatui's crossterm event
+fn convert_key_event(key: CrosstermKeyEvent) -> RatatuiKeyEvent {
+    use std::mem::transmute;
+
+    RatatuiKeyEvent {
+        code: unsafe { transmute::<crossterm::event::KeyCode, ratatui::crossterm::event::KeyCode>(key.code) },
+        modifiers: unsafe { transmute::<crossterm::event::KeyModifiers, ratatui::crossterm::event::KeyModifiers>(key.modifiers) },
+        kind: match key.kind {
+            KeyEventKind::Press => RatatuiKeyEventKind::Press,
+            KeyEventKind::Repeat => RatatuiKeyEventKind::Repeat,
+            KeyEventKind::Release => RatatuiKeyEventKind::Release,
+        },
+        state: unsafe { transmute::<crossterm::event::KeyEventState, ratatui::crossterm::event::KeyEventState>(key.state) },
+    }
+}
 
 // Common navigation pattern for list selection
 fn navigate_list(index: Option<usize>, len: usize, direction: bool) -> usize {
@@ -59,7 +76,7 @@ async fn fetch_author_dynamics(app: &mut App, uid: u64) {
     app.loading_dynamics = false;
 }
 
-pub async fn handle_key_event(app: &mut App, key: ratatui::crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<bool> {
+pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<bool> {
     if key.kind != KeyEventKind::Press {
         return Ok(false);
     }
@@ -151,7 +168,8 @@ fn handle_editing_mode(app: &mut App, key: crossterm::event::KeyEvent, tx: &toki
             app.mode = InputMode::Normal;
         }
         _ => {
-            app.search_input.handle_event(&Event::Key(key));
+            let ratatui_key = convert_key_event(key);
+            app.search_input.handle_event(&Event::Key(ratatui_key));
         }
     }
     Ok(())
@@ -188,7 +206,8 @@ async fn handle_command_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
             // Don't change the current mode or focused_panel, just deactivate command
         }
         _ => {
-            app.command_input.handle_event(&Event::Key(key));
+            let ratatui_key = convert_key_event(key);
+            app.command_input.handle_event(&Event::Key(ratatui_key));
         }
     }
     Ok(false)

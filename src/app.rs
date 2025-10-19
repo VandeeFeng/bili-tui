@@ -2,7 +2,7 @@ use crate::api;
 use crate::handler::handle_key_event;
 use crate::terminal;
 use crate::ui;
-use ratatui::crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode};
 use ratatui::widgets::ListState;
 use std::{error::Error, io, time::Duration};
 use tui_input::Input;

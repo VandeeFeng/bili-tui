@@ -10,9 +10,11 @@ pub fn render_search_panel(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(search_bar, area);
 
     if app.is_editing() {
-        f.set_cursor(
-            area.x + app.search_input.visual_cursor() as u16 + 1,
-            area.y + 1,
+        f.set_cursor_position(
+            (
+                area.x + app.search_input.visual_cursor() as u16 + 1,
+                area.y + 1,
+            )
         );
     }
 }
