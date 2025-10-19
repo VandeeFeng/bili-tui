@@ -29,6 +29,8 @@ pub enum NavigationAction {
     ToggleHelp,
     PanelLeft,
     PanelRight,
+    ContentScrollUp,
+    ContentScrollDown,
 }
 
 /// Result of handling navigation actions
@@ -167,6 +169,8 @@ pub struct App {
     pub selected_author_dynamics: Option<Vec<api::AuthorDynamic>>,
     pub loading_dynamics: bool,
     pub dynamics_scroll_offset: usize,
+    pub selected_dynamic_index: usize,
+    pub dynamics_viewport_height: usize,
     // Cache for author dynamics to avoid repeated API calls
     pub author_dynamics_cache: HashMap<u64, Vec<api::AuthorDynamic>>,
     // Channel to handle async dynamics loading
@@ -195,6 +199,8 @@ impl App {
             selected_author_dynamics: None,
             loading_dynamics: false,
             dynamics_scroll_offset: 0,
+            selected_dynamic_index: 0,
+            dynamics_viewport_height: 20, // Default value
             author_dynamics_cache: HashMap::new(),
             dynamics_tx: Some(dynamics_tx),
             dynamics_rx: Some(dynamics_rx),
@@ -275,6 +281,53 @@ impl App {
         }
     }
 
+    pub async fn play_dynamic_video(&mut self) {
+        let video_title = if let Some(dynamics) = &self.selected_author_dynamics {
+            if let Some(dynamic) = dynamics.get(self.selected_dynamic_index) {
+                if let Some(video_info) = &dynamic.video_info {
+                    Some(video_info.title.clone())
+                } else {
+                    self.add_message("Selected dynamic is not a video".to_string(), MessageLevel::Warning);
+                    return;
+                }
+            } else {
+                self.add_message("Invalid dynamic selection".to_string(), MessageLevel::Warning);
+                return;
+            }
+        } else {
+            self.add_message("No dynamics available".to_string(), MessageLevel::Warning);
+            return;
+        };
+
+        if let Some(title) = video_title {
+            self.add_message(format!("Searching for video: {}", title), MessageLevel::Info);
+
+            match crate::api::search_video_by_title(&title).await {
+                Ok(Some(bvid)) => {
+                    let url = format!("https://www.bilibili.com/video/{}", bvid);
+                    match std::process::Command::new("mpv")
+                        .arg("--no-terminal")
+                        .arg(url)
+                        .spawn()
+                    {
+                        Ok(_) => {
+                            self.add_message(format!("Playing: {}", title), MessageLevel::Success);
+                        }
+                        Err(e) => {
+                            self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    self.add_message("Video not found in search results".to_string(), MessageLevel::Warning);
+                }
+                Err(e) => {
+                    self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
+                }
+            }
+        }
+    }
+
     pub async fn run(mut self) -> Result<(), Box<dyn Error>> {
         let mut terminal = terminal::setup_terminal()?;
         let (tx, mut rx) = mpsc::channel(1);
@@ -314,6 +367,7 @@ impl App {
                                     self.selected_author_dynamics = Some(dynamics);
                                     self.loading_dynamics = false;
                                     self.dynamics_scroll_offset = 0;
+                                    self.selected_dynamic_index = 0; // Reset dynamic selection
                                     self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
                                 }
                             }

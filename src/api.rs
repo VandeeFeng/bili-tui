@@ -277,6 +277,25 @@ pub struct AuthorDynamic {
 }
 
 // Function to get dynamics for a specific user using space API
+// Search for a video by title and return its bvid
+pub async fn search_video_by_title(title: &str) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let videos = search(title).await?;
+
+    // Return the bvid of the first video that matches the title exactly
+    for video in &videos {
+        if video.title == title {
+            return Ok(Some(video.bvid.clone()));
+        }
+    }
+
+    // If no exact match, return the first video's bvid
+    if let Some(first_video) = videos.first() {
+        Ok(Some(first_video.bvid.clone()))
+    } else {
+        Ok(None)
+    }
+}
+
 pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
         "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={}",

@@ -76,11 +76,31 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
             // Show dynamics starting from scroll offset, calculate viewport height
             let viewport_height = moments_chunks[1].height.saturating_sub(2) as usize; // Subtract border lines
+            app.dynamics_viewport_height = viewport_height; // Store for scrolling handler
             let visible_dynamics = dynamics.iter().skip(app.dynamics_scroll_offset).take(viewport_height);
 
             for (display_index, dynamic) in visible_dynamics.enumerate() {
                 let actual_index = app.dynamics_scroll_offset + display_index;
-                content.push(Line::from(format!("Dynamic #{}", actual_index + 1).fg(Color::Cyan)));
+                let is_selected_dynamic = app.selected_dynamic_index == actual_index;
+                let is_list_nav = app.input_mode() == crate::app::InputMode::ListNav;
+
+                // Dynamic header with selection indicator and play option if video
+                let mut header_parts = vec![
+                    if is_selected_dynamic && is_list_nav {
+                        ">> ".fg(Color::Cyan)
+                    } else {
+                        "   ".fg(Color::Reset)
+                    },
+                    Span::raw(format!("Dynamic #{}", actual_index + 1)).fg(Color::Cyan)
+                ];
+
+                // Add [P]lay option for video dynamics when in ListNav mode
+                if dynamic.video_info.is_some() && is_selected_dynamic && is_list_nav {
+                    header_parts.push(Span::raw(" "));
+                    header_parts.push("[P]lay".fg(Color::Green));
+                }
+
+                content.push(Line::from(header_parts));
                 content.push(Line::from(""));
 
                 // Author info

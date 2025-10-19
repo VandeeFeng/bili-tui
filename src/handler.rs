@@ -51,6 +51,11 @@ impl NavigationHandler for App {
             KeyCode::Char('k') if self.can_navigate_panels() => NavigationAction::PanelPrev,
             KeyCode::Char('j') | KeyCode::Down if self.can_navigate_list() => NavigationAction::ListDown,
             KeyCode::Char('k') | KeyCode::Up if self.can_navigate_list() => NavigationAction::ListUp,
+            // Z/X keys for content scrolling (only in moments content panel)
+            KeyCode::Char('z') if self.navigation.current_page == ActivePage::Moments
+                && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
+            KeyCode::Char('x') if self.navigation.current_page == ActivePage::Moments
+                && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
             KeyCode::Enter => NavigationAction::Activate,
             KeyCode::Char('/') => {
                 self.set_focused_panel(Focusable::Search);
@@ -64,7 +69,16 @@ impl NavigationHandler for App {
                 return Ok(false);
             }
             KeyCode::Char('p') => {
-                self.play_video();
+                // Handle play for both search results and dynamics
+                if self.navigation.current_page == ActivePage::Moments
+                    && self.navigation.focused_panel == Focusable::MomentsContent
+                    && self.navigation.input_mode == InputMode::ListNav {
+                    // Play video from selected dynamic
+                    self.play_dynamic_video().await;
+                } else {
+                    // Play video from search results or detail page
+                    self.play_video();
+                }
                 return Ok(false);
             }
             // Horizontal navigation for moments panels
@@ -124,6 +138,8 @@ impl NavigationHandler for App {
             NavigationAction::Activate => self.handle_activate(),
             NavigationAction::PanelLeft => self.handle_horizontal_navigation(false),
             NavigationAction::PanelRight => self.handle_horizontal_navigation(true),
+            NavigationAction::ContentScrollDown => self.handle_content_scrolling(true),
+            NavigationAction::ContentScrollUp => self.handle_content_scrolling(false),
         }
     }
 
@@ -165,12 +181,14 @@ impl App {
                             if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
                                 self.selected_author_dynamics = Some(cached_dynamics.clone());
                                 self.dynamics_scroll_offset = 0;
+                                self.selected_dynamic_index = 0; // Reset dynamic selection
                                 self.add_message(format!("Loaded {} dynamics from cache", cached_dynamics.len()), MessageLevel::Info);
                             } else {
                                 self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
                                 self.loading_dynamics = true;
                                 self.selected_author_dynamics = None;
                                 self.dynamics_scroll_offset = 0;
+                                self.selected_dynamic_index = 0; // Reset dynamic selection
 
                                 // Start async loading
                                 if let Some(ref tx) = self.dynamics_tx {
@@ -190,14 +208,18 @@ impl App {
                         }
                     }
                 } else if self.navigation.focused_panel == Focusable::MomentsContent {
-                    // Scroll dynamics content
+                    // Navigate dynamics content - move between dynamics
                     if let Some(dynamics) = &self.selected_author_dynamics {
                         if is_down {
-                            if self.dynamics_scroll_offset + 1 < dynamics.len() {
-                                self.dynamics_scroll_offset += 1;
+                            // Move to next dynamic
+                            if self.selected_dynamic_index + 1 < dynamics.len() {
+                                self.selected_dynamic_index += 1;
                             }
-                        } else if self.dynamics_scroll_offset > 0 {
-                            self.dynamics_scroll_offset -= 1;
+                        } else {
+                            // Move to previous dynamic
+                            if self.selected_dynamic_index > 0 {
+                                self.selected_dynamic_index -= 1;
+                            }
                         }
                     }
                 }
@@ -205,6 +227,31 @@ impl App {
             }
             _ => NavigationResult::Continue,
         }
+    }
+
+    fn handle_content_scrolling(&mut self, is_down: bool) -> NavigationResult {
+        // Only allow content scrolling in moments content panel
+        if self.navigation.current_page != ActivePage::Moments
+            || self.navigation.focused_panel != Focusable::MomentsContent {
+            return NavigationResult::Continue;
+        }
+
+        if let Some(dynamics) = &self.selected_author_dynamics {
+            // Use simple scroll limit like the original implementation
+            if is_down {
+                // Scroll content down
+                if self.dynamics_scroll_offset + 1 < dynamics.len() {
+                    self.dynamics_scroll_offset += 1;
+                }
+            } else {
+                // Scroll content up
+                if self.dynamics_scroll_offset > 0 {
+                    self.dynamics_scroll_offset -= 1;
+                }
+            }
+        }
+
+        NavigationResult::Handled
     }
 
     fn handle_horizontal_navigation(&mut self, is_right: bool) -> NavigationResult {
