@@ -147,6 +147,7 @@ pub struct App {
     pub selected_author: ListState,
     pub selected_author_dynamics: Option<Vec<api::AuthorDynamic>>,
     pub loading_dynamics: bool,
+    pub dynamics_scroll_offset: usize,
 }
 
 impl App {
@@ -170,6 +171,7 @@ impl App {
             selected_author: ListState::default(),
             selected_author_dynamics: None,
             loading_dynamics: false,
+            dynamics_scroll_offset: 0,
         }
     }
 

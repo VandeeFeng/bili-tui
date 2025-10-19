@@ -119,14 +119,17 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             Line::from(""),
             Line::from("Navigation:".bold()),
             Line::from("  j/k                - Move focus between panels"),
+            Line::from("  /                  - Search"),
+            Line::from("  m                  - Moments (following authors)"),
             Line::from("  Enter              - Select/Enter panel"),
             Line::from("  q/Esc              - Exit current mode/panel"),
             Line::from("  :                  - Open command popup"),
             Line::from("  ?                  - Show help"),
             Line::from(""),
             Line::from("Moments Mode:".bold()),
-            Line::from("  j/k                - Navigate authors list"),
-            Line::from("  Tab                - Switch between author/content panels"),
+            Line::from("  j/k                - Navigate authors list or scroll dynamics content"),
+            Line::from("  h/l                - Switch between author/content panels"),
+            Line::from("  Tab                - Legacy: switch between panels"),
             Line::from("  q/Esc              - Exit moments mode"),
         ];
         let help_panel = Paragraph::new(help_text)
@@ -197,7 +200,6 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                         let uid = author.user_profile.info.uid;
 
                         ListItem::new(Line::from(vec![
-                            Span::raw("👤 "),
                             Span::raw(author_name.clone()),
                             Span::from(" ").fg(Color::DarkGray),
                             Span::raw(format!("(UID: {})", uid)).fg(Color::DarkGray),
@@ -233,8 +235,13 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                         content.push(Line::from("Author Dynamics".bold()));
                         content.push(Line::from(""));
 
-                        for (i, dynamic) in dynamics.iter().enumerate().take(10) { // Show max 10 dynamics
-                            content.push(Line::from(format!("Dynamic #{}", i + 1).fg(Color::Cyan)));
+                        // Show dynamics starting from scroll offset, calculate viewport height
+                        let viewport_height = moments_chunks[1].height.saturating_sub(2) as usize; // Subtract border lines
+                        let visible_dynamics = dynamics.iter().skip(app.dynamics_scroll_offset).take(viewport_height);
+
+                        for (display_index, dynamic) in visible_dynamics.enumerate() {
+                            let actual_index = app.dynamics_scroll_offset + display_index;
+                            content.push(Line::from(format!("Dynamic #{}", actual_index + 1).fg(Color::Cyan)));
                             content.push(Line::from(""));
 
                             // Author info
@@ -249,12 +256,12 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                                     .unwrap_or_default();
                                 content.push(Line::from(vec![
                                     "Time: ".bold(),
-                                    Span::raw(datetime.format("%Y-%m-%d %H:%M").to_string()).fg(Color::DarkGray),
+                                    Span::raw(datetime.format("%Y-%m-%d %H:%M").to_string()).fg(Color::White),
                                 ]));
                             } else {
                                 content.push(Line::from(vec![
                                     "Time: ".bold(),
-                                    Span::raw("Unknown").fg(Color::DarkGray),
+                                    Span::raw("Unknown").fg(Color::White),
                                 ]));
                             }
                             content.push(Line::from(""));
@@ -281,11 +288,11 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                                 ]));
                                 content.push(Line::from(vec![
                                     "Duration: ".italic(),
-                                    Span::raw(video.duration_text.clone()).fg(Color::DarkGray),
+                                    Span::raw(video.duration_text.clone()).fg(Color::White),
                                 ]));
                                 content.push(Line::from(vec![
                                     "Plays: ".italic(),
-                                    Span::raw(video.stat.play.clone()).fg(Color::DarkGray),
+                                    Span::raw(video.stat.play.clone()).fg(Color::White),
                                 ]));
                                 content.push(Line::from(""));
                             }
@@ -308,8 +315,14 @@ pub fn ui(f: &mut Frame, app: &mut App) {
                             content.push(Line::from(""));
                         }
 
-                        if dynamics.len() > 10 {
-                            content.push(Line::from(format!("... and {} more dynamics", dynamics.len() - 10).fg(Color::DarkGray)));
+                        // Show scroll position indicator if there are more dynamics
+                        if dynamics.len() > viewport_height {
+                            let remaining = dynamics.len() - app.dynamics_scroll_offset - viewport_height.min(dynamics.len() - app.dynamics_scroll_offset);
+                            if remaining > 0 {
+                                content.push(Line::from(format!("... {} more below, {} total", remaining, dynamics.len()).fg(Color::DarkGray)));
+                            } else {
+                                content.push(Line::from(format!("End of {} dynamics", dynamics.len()).fg(Color::DarkGray)));
+                            }
                         }
 
                         content

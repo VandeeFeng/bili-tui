@@ -7,30 +7,26 @@ use tui_input::backend::crossterm::EventHandler;
 
 async fn fetch_author_dynamics(app: &mut App, uid: u64) {
     if app.loading_dynamics {
-        app.add_message("DEBUG: Already loading dynamics, skipping".to_string(), crate::app::MessageLevel::Info);
         return; // Already loading
     }
 
-    app.add_message(format!("DEBUG: fetch_author_dynamics called for UID {}", uid), crate::app::MessageLevel::Info);
     app.loading_dynamics = true;
-    app.add_message(format!("Loading dynamics for UID {}...", uid), crate::app::MessageLevel::Info);
 
     match api::get_user_dynamics(uid).await {
         Ok(dynamics) => {
             let count = dynamics.len();
-            app.add_message(format!("DEBUG: Successfully loaded {} dynamics in handler", count), crate::app::MessageLevel::Success);
             app.selected_author_dynamics = Some(dynamics);
-            app.add_message(format!("Loaded {} dynamics", count), crate::app::MessageLevel::Success);
+            app.dynamics_scroll_offset = 0; // Reset scroll offset when loading new dynamics
+            app.add_message(format!("Successfully loaded {} dynamics", count), crate::app::MessageLevel::Success);
         }
         Err(e) => {
-            app.add_message(format!("DEBUG: Handler failed to load dynamics: {}", e), crate::app::MessageLevel::Error);
             app.add_message(format!("Failed to load dynamics: {}", e), crate::app::MessageLevel::Error);
             app.selected_author_dynamics = None;
+            app.dynamics_scroll_offset = 0; // Reset scroll offset on error
         }
     }
 
     app.loading_dynamics = false;
-    app.add_message("DEBUG: fetch_author_dynamics completed in handler".to_string(), crate::app::MessageLevel::Info);
 }
 
 pub async fn handle_key_event(app: &mut App, key: ratatui::crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<bool> {
@@ -49,7 +45,7 @@ pub async fn handle_key_event(app: &mut App, key: ratatui::crossterm::event::Key
     }
 
     match app.mode {
-        InputMode::Normal => handle_normal_mode(app, key, tx)?,
+        InputMode::Normal => handle_normal_mode(app, key, tx).await?,
         InputMode::Editing => handle_editing_mode(app, key, tx)?,
         InputMode::Detail => handle_detail_mode(app, key)?,
         InputMode::ListNav => handle_list_nav_mode(app, key)?,
@@ -61,7 +57,7 @@ pub async fn handle_key_event(app: &mut App, key: ratatui::crossterm::event::Key
     Ok(false)
 }
 
-fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
+async fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<()> {
     // Handle common keys first
     match app.handle_common_keys(key) {
         CommonKeyResult::Handled => return Ok(()),
@@ -91,6 +87,11 @@ fn handle_normal_mode(app: &mut App, key: crossterm::event::KeyEvent, _tx: &toki
         KeyCode::Char('/') => {
             app.focused_panel = Focusable::Search;
             app.mode = InputMode::Editing;
+        }
+        KeyCode::Char('m') => {
+            // Execute moments command as global shortcut
+            let cmd = command::Command::ShowMoments;
+            let _ = command::execute(cmd, app).await;
         }
         _ => {}
     }
@@ -333,6 +334,13 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
                         }
                     }
                 }
+            } else if app.focused_panel == Focusable::MomentsContent {
+                // Scroll down in dynamics content
+                if let Some(dynamics) = &app.selected_author_dynamics {
+                    if app.dynamics_scroll_offset + 1 < dynamics.len() {
+                        app.dynamics_scroll_offset += 1;
+                    }
+                }
             } else {
                 // Move focus to next panel
                 app.move_focus_next();
@@ -365,17 +373,32 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
                         }
                     }
                 }
+            } else if app.focused_panel == Focusable::MomentsContent {
+                // Scroll up in dynamics content
+                if app.dynamics_scroll_offset > 0 {
+                    app.dynamics_scroll_offset -= 1;
+                }
             } else {
                 // Move focus to previous panel
                 app.move_focus_prev();
             }
         }
         KeyCode::Tab => {
-            // Switch between author and content panels
+            // Legacy Tab key - switch between author and content panels
             match app.focused_panel {
                 Focusable::MomentsAuthors => app.focused_panel = Focusable::MomentsContent,
                 Focusable::MomentsContent => app.focused_panel = Focusable::MomentsAuthors,
                 _ => app.focused_panel = Focusable::MomentsAuthors,
+            }
+        }
+        KeyCode::Char('h') => {
+            if app.focused_panel == Focusable::MomentsContent {
+                app.focused_panel = Focusable::MomentsAuthors;
+            }
+        }
+        KeyCode::Char('l') => {
+            if app.focused_panel == Focusable::MomentsAuthors {
+                app.focused_panel = Focusable::MomentsContent;
             }
         }
         KeyCode::Up | KeyCode::Down => {
@@ -417,29 +440,11 @@ async fn handle_moments_mode(app: &mut App, key: crossterm::event::KeyEvent) -> 
         }
         KeyCode::Enter => {
             // Load dynamics for selected author
-            app.add_message("DEBUG: Enter key pressed in moments mode".to_string(), crate::app::MessageLevel::Info);
-
-            let author_info = if let (Some(data), Some(selected_index)) = (&app.moments_data, app.selected_author.selected()) {
+            if let (Some(data), Some(selected_index)) = (&app.moments_data, app.selected_author.selected()) {
                 if let Some(author) = data.get(selected_index) {
-                    Some((author.user_profile.info.uid, author.user_profile.info.uname.clone()))
-                } else {
-                    app.add_message("DEBUG: No author found at selected index".to_string(), crate::app::MessageLevel::Warning);
-                    None
+                    let uid = author.user_profile.info.uid;
+                    fetch_author_dynamics(app, uid).await;
                 }
-            } else {
-                app.add_message("DEBUG: No moments data or no author selected".to_string(), crate::app::MessageLevel::Warning);
-                if app.moments_data.is_none() {
-                    app.add_message("DEBUG: moments_data is None".to_string(), crate::app::MessageLevel::Warning);
-                }
-                if app.selected_author.selected().is_none() {
-                    app.add_message("DEBUG: No author selected".to_string(), crate::app::MessageLevel::Warning);
-                }
-                None
-            };
-
-            if let Some((uid, author_name)) = author_info {
-                app.add_message(format!("DEBUG: Loading dynamics for {} (UID: {})", author_name, uid), crate::app::MessageLevel::Info);
-                fetch_author_dynamics(app, uid).await;
             }
         }
         _ => {}
