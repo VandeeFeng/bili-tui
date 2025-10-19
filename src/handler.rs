@@ -251,6 +251,8 @@ impl App {
                     self.dynamics_scroll_offset -= 1;
                 }
             }
+            // Sync selection with scroll offset
+            self.selected_dynamic_index = self.dynamics_scroll_offset;
         }
 
         NavigationResult::Handled
