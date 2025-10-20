@@ -177,15 +177,46 @@ struct MomentsData {
 
 
 pub async fn get_moments() -> Result<Vec<AuthorItem>, Box<dyn std::error::Error + Send + Sync>> {
-    let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
-    let client = BilibiliClient::new()?;
-    let api_response: MomentsResponse = client.get_and_check(url).await?;
+    let config = crate::config::FollowingConfig::load()?;
 
-    if api_response.code != 0 {
-        return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
+    if config.enable_custom_following {
+        let mut authors = config.to_author_items();
+        authors.retain(|author| !config.is_blacklisted(author.user_profile.info.uid));
+        return Ok(authors);
     }
 
-    Ok(api_response.data.items)
+    let mut authors = load_moments_from_cache().unwrap_or_default();
+
+    if authors.is_empty() {
+        let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
+        let client = BilibiliClient::new()?;
+        let api_response: MomentsResponse = client.get_and_check(url).await?;
+
+        if api_response.code != 0 {
+            return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
+        }
+
+        authors = api_response.data.items;
+        save_moments_to_cache(&authors)?;
+    }
+
+    authors.retain(|author| !config.is_blacklisted(author.user_profile.info.uid));
+    Ok(authors)
+}
+
+fn load_moments_from_cache() -> Option<Vec<AuthorItem>> {
+    let config = crate::config::FollowingConfig::load().ok()?;
+    if config.custom_authors.is_empty() {
+        return None;
+    }
+    Some(config.to_author_items())
+}
+
+fn save_moments_to_cache(authors: &[AuthorItem]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut config = crate::config::FollowingConfig::load()?;
+    config.update_from_api_data(authors);
+    config.save()?;
+    Ok(())
 }
 
 // Space API structures for user dynamics

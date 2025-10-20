@@ -16,7 +16,7 @@ pub fn render_results_panel(f: &mut Frame, area: Rect, app: &mut App) {
             let title_wrapped = textwrap::wrap(&video.title, options);
 
             // Check if this item is selected
-            let is_selected = app.results_list_state.selected().map_or(false, |selected| selected == index);
+            let is_selected = app.results_list_state.selected() == Some(index);
 
             let mut lines: Vec<Line> = title_wrapped
                 .iter()

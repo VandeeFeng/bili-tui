@@ -16,7 +16,7 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
             let uid = author.user_profile.info.uid;
 
             // Check if this author is selected
-            let is_selected = app.selected_author.selected().map_or(false, |selected| selected == index);
+            let is_selected = app.selected_author.selected() == Some(index);
 
             ListItem::new(Line::from(vec![
                 if is_selected {

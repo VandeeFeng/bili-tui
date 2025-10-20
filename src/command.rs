@@ -7,6 +7,13 @@ pub enum Command {
     PlayUrl(String),
     ShowVideoInfo(String),
     ShowMoments,
+    AddAuthor(u64, String),
+    RemoveAuthor(u64),
+    BanAuthor(u64, String),
+    UnbanAuthor(u64),
+    ListAuthors,
+    RefreshAuthors,
+    ToggleCustom,
     Help,
     Quit,
 }
@@ -35,6 +42,52 @@ pub fn parse(input: &str) -> Result<Command, String> {
                 return Err("Usage: moments (or m)".to_string());
             }
             Ok(Command::ShowMoments)
+        }
+        "add" => {
+            if args.len() != 2 {
+                return Err("Usage: add <uid> <username>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::AddAuthor(uid, args[1].to_string()))
+        }
+        "remove" => {
+            if args.len() != 1 {
+                return Err("Usage: remove <uid>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::RemoveAuthor(uid))
+        }
+        "ban" => {
+            if args.len() != 2 {
+                return Err("Usage: ban <uid> <username>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::BanAuthor(uid, args[1].to_string()))
+        }
+        "unban" => {
+            if args.len() != 1 {
+                return Err("Usage: unban <uid>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::UnbanAuthor(uid))
+        }
+        "list" => {
+            if !args.is_empty() {
+                return Err("Usage: list".to_string());
+            }
+            Ok(Command::ListAuthors)
+        }
+        "refresh" => {
+            if !args.is_empty() {
+                return Err("Usage: refresh".to_string());
+            }
+            Ok(Command::RefreshAuthors)
+        }
+        "toggle-custom" => {
+            if !args.is_empty() {
+                return Err("Usage: toggle-custom".to_string());
+            }
+            Ok(Command::ToggleCustom)
         }
         "help" => Ok(Command::Help),
         "q" => Ok(Command::Quit),
@@ -144,6 +197,105 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                     Err(error_msg)
                 }
             }
+        }
+        Command::AddAuthor(uid, username) => {
+            app.following_config.add_custom_author(uid, username.clone());
+            if let Err(e) = app.following_config.save() {
+                return Err(format!("Failed to save config: {}", e));
+            }
+            app.add_message(format!("Added author: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            Ok(())
+        }
+        Command::RemoveAuthor(uid) => {
+            if app.following_config.remove_custom_author(uid) {
+                if let Err(e) = app.following_config.save() {
+                    return Err(format!("Failed to save config: {}", e));
+                }
+                app.add_message(format!("Removed author with UID: {}", uid), crate::app::MessageLevel::Success);
+            } else {
+                app.add_message(format!("Author with UID {} not found", uid), crate::app::MessageLevel::Warning);
+            }
+            Ok(())
+        }
+        Command::BanAuthor(uid, username) => {
+            app.following_config.add_to_blacklist(uid, username.clone());
+            if let Err(e) = app.following_config.save() {
+                return Err(format!("Failed to save config: {}", e));
+            }
+            app.add_message(format!("Banned author: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            Ok(())
+        }
+        Command::UnbanAuthor(uid) => {
+            if app.following_config.remove_from_blacklist(uid) {
+                if let Err(e) = app.following_config.save() {
+                    return Err(format!("Failed to save config: {}", e));
+                }
+                app.add_message(format!("Unbanned author with UID: {}", uid), crate::app::MessageLevel::Success);
+            } else {
+                app.add_message(format!("Author with UID {} not found in blacklist", uid), crate::app::MessageLevel::Warning);
+            }
+            Ok(())
+        }
+        Command::ListAuthors => {
+            let status = if app.following_config.enable_custom_following {
+                "Custom following (ON)"
+            } else {
+                "API following (Custom OFF)"
+            };
+            app.add_message(format!("Following status: {}", status), crate::app::MessageLevel::Info);
+
+            if app.following_config.enable_custom_following && !app.following_config.custom_authors.is_empty() {
+                app.add_message("Custom authors:".to_string(), crate::app::MessageLevel::Info);
+                let authors = app.following_config.custom_authors.clone();
+                for author in &authors {
+                    app.add_message(format!("  - {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Info);
+                }
+            }
+
+            if !app.following_config.blacklist.is_empty() {
+                app.add_message("Blacklisted authors:".to_string(), crate::app::MessageLevel::Warning);
+                let blacklist = app.following_config.blacklist.clone();
+                for author in &blacklist {
+                    app.add_message(format!("  - {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Warning);
+                }
+            }
+
+            if app.following_config.custom_authors.is_empty() && app.following_config.blacklist.is_empty() {
+                app.add_message("No custom authors or blacklist configured".to_string(), crate::app::MessageLevel::Info);
+            }
+            Ok(())
+        }
+        Command::RefreshAuthors => {
+            if app.following_config.enable_custom_following {
+                return Err("Cannot refresh authors while custom following is enabled. Use 'toggle-custom' to disable custom following first.".to_string());
+            }
+
+            app.add_message("Refreshing authors from API...".to_string(), crate::app::MessageLevel::Info);
+            match api::get_moments().await {
+                Ok(authors) => {
+                    let count = authors.len();
+                    app.add_message(format!("Refreshed {} authors from API", count), crate::app::MessageLevel::Success);
+                    Ok(())
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to refresh authors: {}", e);
+                    app.add_message(error_msg.clone(), crate::app::MessageLevel::Error);
+                    Err(error_msg)
+                }
+            }
+        }
+        Command::ToggleCustom => {
+            app.following_config.enable_custom_following = !app.following_config.enable_custom_following;
+            if let Err(e) = app.following_config.save() {
+                return Err(format!("Failed to save config: {}", e));
+            }
+            let status = if app.following_config.enable_custom_following {
+                "Custom following enabled"
+            } else {
+                "Custom following disabled"
+            };
+            app.add_message(status.to_string(), crate::app::MessageLevel::Success);
+            Ok(())
         }
         Command::Help => {
             app.overlays.help = true;

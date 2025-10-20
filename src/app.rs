@@ -1,4 +1,5 @@
 use crate::api;
+use crate::config::FollowingConfig;
 use crate::handler::handle_key_event;
 use crate::terminal;
 use crate::ui;
@@ -163,6 +164,9 @@ pub struct App {
     pub messages: Vec<Message>,
     pub show_error_popup: bool,
 
+    // Config
+    pub following_config: FollowingConfig,
+
     // Moments related fields
     pub moments_data: Option<Vec<api::AuthorItem>>,
     pub selected_author: ListState,
@@ -182,6 +186,7 @@ impl App {
 
     pub fn new() -> Self {
         let (dynamics_tx, dynamics_rx) = tokio::sync::mpsc::channel(32);
+        let following_config = FollowingConfig::load().unwrap_or_default();
         Self {
             search_input: Input::default(),
             command_input: Input::default(),
@@ -193,6 +198,7 @@ impl App {
             last_error: None,
             messages: Vec::new(),
             show_error_popup: false,
+            following_config,
             // Moments related fields
             moments_data: None,
             selected_author: ListState::default(),
@@ -354,27 +360,23 @@ impl App {
             }
 
             // Check for dynamics loading responses
-            if let Some(ref mut dynamics_rx) = self.dynamics_rx {
-                if let Ok((uid, dynamics)) = dynamics_rx.try_recv() {
+            if let Some(ref mut dynamics_rx) = self.dynamics_rx
+                && let Ok((uid, dynamics)) = dynamics_rx.try_recv() {
                     let count = dynamics.len();
                     self.author_dynamics_cache.insert(uid, dynamics.clone());
 
                     // Update UI if this is the currently selected author
-                    if let Some(selected_index) = self.selected_author.selected() {
-                        if let Some(ref data) = self.moments_data {
-                            if let Some(author) = data.get(selected_index) {
-                                if author.user_profile.info.uid == uid {
+                    if let Some(selected_index) = self.selected_author.selected()
+                        && let Some(ref data) = self.moments_data
+                            && let Some(author) = data.get(selected_index)
+                                && author.user_profile.info.uid == uid {
                                     self.selected_author_dynamics = Some(dynamics);
                                     self.loading_dynamics = false;
                                     self.dynamics_scroll_offset = 0;
                                     self.selected_dynamic_index = 0; // Reset dynamic selection
                                     self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
                                 }
-                            }
-                        }
-                    }
                 }
-            }
 
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()? {
