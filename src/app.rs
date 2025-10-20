@@ -28,6 +28,7 @@ pub enum NavigationAction {
     Exit,
     ToggleCommand,
     ToggleHelp,
+    ToggleMessages,
     PanelLeft,
     PanelRight,
     ContentScrollUp,
@@ -104,6 +105,7 @@ pub enum InputMode {
 pub struct OverlayState {
     pub command: bool,
     pub help: bool,
+    pub messages: bool,
 }
 
 impl OverlayState {
@@ -111,6 +113,7 @@ impl OverlayState {
         Self {
             command: false,
             help: false,
+            messages: false,
         }
     }
 }

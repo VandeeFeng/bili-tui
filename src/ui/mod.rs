@@ -35,6 +35,11 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         render_help_popup(f, app);
     }
 
+    // Render messages popup if active
+    if app.overlays.messages {
+        render_messages_popup(f, app);
+    }
+
     // Render command popup if active
     if app.is_commanding() {
         render_command_popup(f, app);

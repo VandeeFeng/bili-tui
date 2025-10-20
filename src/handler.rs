@@ -37,6 +37,11 @@ impl NavigationHandler for App {
             return self.handle_help_mode(key).await;
         }
 
+        // Handle messages overlay
+        if self.overlays.messages {
+            return self.handle_messages_mode(key).await;
+        }
+
         // Handle editing mode
         if self.navigation.input_mode == InputMode::Editing {
             return self.handle_editing_mode(key, tx).await.map(|_| false);
@@ -64,6 +69,7 @@ impl NavigationHandler for App {
                 self.set_input_mode(InputMode::Editing);
                 return Ok(false);
             }
+            KeyCode::Char('M') => NavigationAction::ToggleMessages,
             KeyCode::Char('m') => {
                 // Handle moments command
                 let cmd = crate::command::Command::ShowMoments;
@@ -105,6 +111,10 @@ impl NavigationHandler for App {
             }
             NavigationAction::ToggleHelp => {
                 self.overlays.help = true;
+                NavigationResult::Handled
+            }
+            NavigationAction::ToggleMessages => {
+                self.overlays.messages = true;
                 NavigationResult::Handled
             }
             NavigationAction::Exit => {
@@ -407,6 +417,31 @@ impl App {
             }
             KeyCode::Char('m') => {
                 self.overlays.help = false;
+                let cmd = crate::command::Command::ShowMoments;
+                let _ = crate::command::execute(cmd, self).await;
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    async fn handle_messages_mode(&mut self, key: crossterm::event::KeyEvent) -> std::io::Result<bool> {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Char(':') => {
+                self.overlays.command = true;
+                self.overlays.messages = false;
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.overlays.messages = false;
+            }
+            KeyCode::Char('/') => {
+                self.overlays.messages = false;
+                self.set_focused_panel(Focusable::Search);
+                self.set_input_mode(InputMode::Editing);
+            }
+            KeyCode::Char('m') => {
+                self.overlays.messages = false;
                 let cmd = crate::command::Command::ShowMoments;
                 let _ = crate::command::execute(cmd, self).await;
             }

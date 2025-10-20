@@ -19,6 +19,7 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("Global Shortcuts:".bold().yellow()),
         Line::from("  /                  - Search (global shortcut)"),
         Line::from("  m                  - Moments/Following updates"),
+        Line::from("  M                  - Show messages popup"),
         Line::from("  :                  - Command mode"),
         Line::from("  ?                  - Show this help"),
         Line::from("  q/Esc              - Exit current mode or quit"),
@@ -94,6 +95,56 @@ pub fn render_command_popup(f: &mut Frame, app: &mut App) {
             popup_area.y + 1,
         )
     );
+}
+
+pub fn render_messages_popup(f: &mut Frame, app: &App) {
+    // Calculate popup area to occupy 70% of terminal (same as help)
+    let popup_width = f.area().width * 70 / 100;
+    let popup_height = f.area().height * 70 / 100;
+    let popup_area = app.calculate_popup_area(f.area(), popup_width, popup_height);
+
+    // Clear the background area to create a clean overlay
+    f.render_widget(Clear, popup_area);
+
+    if app.messages.is_empty() {
+        let empty_text = vec![
+            Line::from("Messages".bold().cyan()),
+            Line::from(""),
+            Line::from("No messages yet.".italic().gray()),
+        ];
+
+        let messages_panel = Paragraph::new(empty_text)
+            .block(app.create_popup_block("Messages", Color::Cyan))
+            .wrap(ratatui::widgets::Wrap { trim: true });
+        f.render_widget(messages_panel, popup_area);
+        return;
+    }
+
+    let mut message_lines = vec![
+        Line::from(format!("Messages ({})", app.messages.len()).bold().cyan()),
+        Line::from(""),
+    ];
+
+    for (index, message) in app.messages.iter().enumerate() {
+        let message_text = match message.level {
+            crate::app::MessageLevel::Info => Line::from(message.text.clone()).cyan(),
+            crate::app::MessageLevel::Success => Line::from(message.text.clone()).green(),
+            crate::app::MessageLevel::Warning => Line::from(message.text.clone()).yellow(),
+            crate::app::MessageLevel::Error => Line::from(message.text.clone()).red(),
+        };
+
+        message_lines.push(message_text);
+
+        // Add spacing between messages (but not after the last one)
+        if index < app.messages.len() - 1 {
+            message_lines.push(Line::from(""));
+        }
+    }
+
+    let messages_panel = Paragraph::new(message_lines)
+        .block(app.create_popup_block("Messages", Color::Cyan))
+        .wrap(ratatui::widgets::Wrap { trim: true });
+    f.render_widget(messages_panel, popup_area);
 }
 
 pub fn render_error_popup(f: &mut Frame, app: &App) {
