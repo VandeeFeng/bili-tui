@@ -3,7 +3,15 @@ use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
 use ratatui::widgets::{Clear, Paragraph};
 
-pub fn render_help_popup(f: &mut Frame, app: &App) {
+/// Generic scrollable content renderer for popup windows
+fn render_scrollable_popup(
+    f: &mut Frame,
+    app: &App,
+    content: &[Line],
+    title: &str,
+    color: Color,
+    scroll_offset: usize,
+) -> Rect {
     // Calculate popup area to occupy 70% of terminal
     let popup_width = f.area().width * 70 / 100;
     let popup_height = f.area().height * 70 / 100;
@@ -12,6 +20,26 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
     // Clear the background area to create a clean overlay
     f.render_widget(Clear, popup_area);
 
+    // Apply scrolling to content
+    let visible_height = popup_area.height.saturating_sub(2) as usize; // Subtract border lines
+    let scroll_offset = scroll_offset.min(content.len().saturating_sub(1)); // Clamp to valid range
+    let end_line = (scroll_offset + visible_height).min(content.len());
+
+    let visible_content: Vec<Line> = if scroll_offset < content.len() {
+        content[scroll_offset..end_line].to_vec()
+    } else {
+        content[content.len().saturating_sub(visible_height).min(content.len())..content.len()].to_vec()
+    };
+
+    let content_panel = Paragraph::new(visible_content)
+        .block(app.create_popup_block(title, color))
+        .wrap(ratatui::widgets::Wrap { trim: true });
+    f.render_widget(content_panel, popup_area);
+
+    popup_area
+}
+
+pub fn render_help_popup(f: &mut Frame, app: &App) {
     let help_text = vec![
         Line::from("Bili-TUI - Bilibili Terminal UI Help".bold().cyan()),
         Line::from(""),
@@ -29,7 +57,6 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  j/k                - Move focus between panels"),
         Line::from("  h/l                - Switch panels (in Moments mode)"),
         Line::from("  ←/→               - Switch panels (alternative)"),
-        Line::from("  Tab                - Legacy panel switching"),
         Line::from("  Enter              - Activate/Select current panel"),
         Line::from(""),
 
@@ -37,8 +64,11 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  video <url>        - Play video with mpv"),
         Line::from("  video-info <url>   - Show video details"),
         Line::from("  moments (or m)     - Show following authors' updates"),
+        Line::from("  favorite (or f)   - Show favorite authors' updates"),
         Line::from("  add <uid> <name>   - Add author to custom following"),
-        Line::from("  remove <uid>       - Remove author from custom following"),
+        Line::from("  rm <uid>           - Remove author from custom following"),
+        Line::from("  add_f <uid> <name> - Add author to favorites"),
+        Line::from("  rm_f <uid>         - Remove author from favorites"),
         Line::from("  ban <uid> <name>   - Add author to blacklist"),
         Line::from("  unban <uid>        - Remove author from blacklist"),
         Line::from("  list               - Show following and blacklist status"),
@@ -70,13 +100,19 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  q/Esc              - Return to search"),
         Line::from(""),
 
+        Line::from("Popup Navigation:".bold().yellow()),
+        Line::from("  In Help/Messages popups:"),
+        Line::from("    j/k, ↑/↓         - Scroll content"),
+        Line::from("    q/Esc              - Close popup"),
+        Line::from("    /                  - Switch to search"),
+        Line::from("    :                  - Switch to command"),
+        Line::from("    m                  - Switch to moments"),
+        Line::from(""),
+
         Line::from("Press q/Esc to close help".italic().gray()),
     ];
 
-    let help_panel = Paragraph::new(help_text)
-        .block(app.create_popup_block("Help", Color::Cyan))
-        .wrap(ratatui::widgets::Wrap { trim: true });
-    f.render_widget(help_panel, popup_area);
+    render_scrollable_popup(f, app, &help_text, "Help", Color::Cyan, app.overlays.help_scroll_offset);
 }
 
 pub fn render_command_popup(f: &mut Frame, app: &mut App) {
@@ -98,14 +134,6 @@ pub fn render_command_popup(f: &mut Frame, app: &mut App) {
 }
 
 pub fn render_messages_popup(f: &mut Frame, app: &App) {
-    // Calculate popup area to occupy 70% of terminal (same as help)
-    let popup_width = f.area().width * 70 / 100;
-    let popup_height = f.area().height * 70 / 100;
-    let popup_area = app.calculate_popup_area(f.area(), popup_width, popup_height);
-
-    // Clear the background area to create a clean overlay
-    f.render_widget(Clear, popup_area);
-
     if app.messages.is_empty() {
         let empty_text = vec![
             Line::from("Messages".bold().cyan()),
@@ -113,10 +141,7 @@ pub fn render_messages_popup(f: &mut Frame, app: &App) {
             Line::from("No messages yet.".italic().gray()),
         ];
 
-        let messages_panel = Paragraph::new(empty_text)
-            .block(app.create_popup_block("Messages", Color::Cyan))
-            .wrap(ratatui::widgets::Wrap { trim: true });
-        f.render_widget(messages_panel, popup_area);
+        render_scrollable_popup(f, app, &empty_text, "Messages", Color::Cyan, 0);
         return;
     }
 
@@ -141,10 +166,14 @@ pub fn render_messages_popup(f: &mut Frame, app: &App) {
         }
     }
 
-    let messages_panel = Paragraph::new(message_lines)
-        .block(app.create_popup_block("Messages", Color::Cyan))
-        .wrap(ratatui::widgets::Wrap { trim: true });
-    f.render_widget(messages_panel, popup_area);
+    // Add navigation help at the end
+    message_lines.push(Line::from(""));
+    message_lines.push(Line::from(""));
+    message_lines.push(Line::from("Messages Navigation:".bold().yellow()));
+    message_lines.push(Line::from("  j/k, ↑/↓           - Scroll messages"));
+    message_lines.push(Line::from("  q/Esc              - Close messages"));
+
+    render_scrollable_popup(f, app, &message_lines, "Messages", Color::Cyan, app.overlays.messages_scroll_offset);
 }
 
 pub fn render_error_popup(f: &mut Frame, app: &App) {

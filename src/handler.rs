@@ -19,6 +19,25 @@ pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx
     app.handle_key(key, tx).await
 }
 
+/// Universal scroll key handler for popup content
+fn handle_popup_scroll_keys(scroll_offset: &mut usize, key: crossterm::event::KeyEvent) -> bool {
+    use crossterm::event::KeyCode;
+
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            *scroll_offset += 1;
+            true
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if *scroll_offset > 0 {
+                *scroll_offset -= 1;
+            }
+            true
+        }
+        _ => false, // Not a scroll key
+    }
+}
+
 impl NavigationHandler for App {
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<bool> {
         use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
@@ -81,12 +100,12 @@ impl NavigationHandler for App {
                 if self.navigation.current_page == ActivePage::Moments
                     && self.navigation.focused_panel == Focusable::MomentsContent
                     && self.navigation.input_mode == InputMode::ListNav {
-                    // Play video from selected dynamic
-                    self.play_dynamic_video().await;
-                } else {
-                    // Play video from search results or detail page
-                    self.play_video();
-                }
+                        // Play video from selected dynamic
+                        self.play_dynamic_video().await;
+                    } else {
+                        // Play video from search results or detail page
+                        self.play_video();
+                    }
                 return Ok(false);
             }
             // Horizontal navigation for moments panels
@@ -111,10 +130,12 @@ impl NavigationHandler for App {
             }
             NavigationAction::ToggleHelp => {
                 self.overlays.help = true;
+                self.overlays.help_scroll_offset = 0;
                 NavigationResult::Handled
             }
             NavigationAction::ToggleMessages => {
                 self.overlays.messages = true;
+                self.overlays.messages_scroll_offset = 0;
                 NavigationResult::Handled
             }
             NavigationAction::Exit => {
@@ -166,90 +187,187 @@ impl NavigationHandler for App {
 
 impl App {
     // Helper methods for navigation
+
+    /// Calculate next index for circular navigation
+    fn calculate_next_index(current: usize, max_len: usize, is_down: bool) -> usize {
+        if is_down {
+            if current >= max_len.saturating_sub(1) { 0 } else { current + 1 }
+        } else if current == 0 { max_len.saturating_sub(1) } else { current - 1 }
+    }
+
+    /// Load dynamics for a specific author
+    fn load_author_dynamics(&mut self, uid: u64) {
+        // Check cache first
+        if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
+            self.selected_author_dynamics = Some(cached_dynamics.clone());
+            self.dynamics_scroll_offset = 0;
+            self.selected_dynamic_index = 0;
+            self.add_message(format!("Loaded {} dynamics from cache", cached_dynamics.len()), MessageLevel::Info);
+            return;
+        }
+
+        self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
+        self.loading_dynamics = true;
+        self.selected_author_dynamics = None;
+        self.dynamics_scroll_offset = 0;
+        self.selected_dynamic_index = 0;
+
+        // Start async loading
+        if let Some(ref tx) = self.dynamics_tx {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                match crate::api::get_user_dynamics(uid).await {
+                    Ok(dynamics) => {
+                        let _ = tx.send((uid, dynamics)).await;
+                    }
+                    Err(_) => {
+                        // Could send error message through another channel if needed
+                    }
+                }
+            });
+        }
+    }
+
+    /// Handle navigation in moments authors panel
+    fn handle_moments_authors_navigation(&mut self, is_down: bool) -> NavigationResult {
+        let Some(data) = &self.moments_data else {
+            return NavigationResult::Handled;
+        };
+
+        if data.is_empty() {
+            return NavigationResult::Handled;
+        }
+
+        let current = self.selected_author.selected().unwrap_or(0);
+        let new_index = Self::calculate_next_index(current, data.len(), is_down);
+        self.selected_author.select(Some(new_index));
+
+        // Load dynamics for selected author
+        if let Some(author) = data.get(new_index) {
+            self.load_author_dynamics(author.user_profile.info.uid);
+        }
+
+        NavigationResult::Handled
+    }
+
+    /// Handle navigation in moments content panel
+    fn handle_moments_content_navigation(&mut self, is_down: bool) -> NavigationResult {
+        let Some(dynamics) = &self.selected_author_dynamics else {
+            return NavigationResult::Handled;
+        };
+
+        if is_down {
+            // Move to next dynamic
+            if self.selected_dynamic_index + 1 < dynamics.len() {
+                self.selected_dynamic_index += 1;
+            }
+        } else {
+            // Move to previous dynamic
+            if self.selected_dynamic_index > 0 {
+                self.selected_dynamic_index -= 1;
+            }
+        }
+
+        NavigationResult::Handled
+    }
+
+    /// Create VideoInfo from search result
+    fn create_video_info(&self, video: &crate::api::VideoResult) -> crate::api::VideoInfo {
+        crate::api::VideoInfo {
+            bvid: video.bvid.clone(),
+            title: video.title.clone(),
+            desc: video.description.clone(),
+            owner: crate::api::Owner {
+                name: video.author.clone(),
+            },
+            stat: crate::api::Stat {
+                view: 0, // Will be populated when fully loaded
+                like: video.like,
+                coin: 0,
+                favorite: 0,
+                share: 0,
+            },
+        }
+    }
+
+    /// Activate search panel
+    fn activate_search_panel(&mut self) -> NavigationResult {
+        self.set_input_mode(InputMode::Editing);
+        NavigationResult::Handled
+    }
+
+    /// Activate results panel
+    fn activate_results_panel(&mut self) -> NavigationResult {
+        if self.navigation.input_mode != InputMode::ListNav {
+            self.set_input_mode(InputMode::ListNav);
+        } else {
+            // In ListNav mode, Enter opens video details
+            if let Some(selected_index) = self.results_list_state.selected()
+                && let Some(video) = self.search_results.get(selected_index) {
+                    self.video_info = Some(self.create_video_info(video));
+                    self.set_active_page(ActivePage::Detail);
+                    self.set_input_mode(InputMode::Normal);
+            }
+        }
+        NavigationResult::Handled
+    }
+
+    /// Activate moments authors panel
+    fn activate_moments_authors(&mut self) -> NavigationResult {
+        if self.moments_data.as_ref().is_none_or(|d| d.is_empty()) {
+            return NavigationResult::Handled;
+        }
+
+        if self.navigation.input_mode != InputMode::ListNav {
+            self.set_input_mode(InputMode::ListNav);
+        } else {
+            // In ListNav mode, Enter switches to content panel
+            self.set_focused_panel(Focusable::MomentsContent);
+            self.set_input_mode(InputMode::Normal);
+        }
+        NavigationResult::Handled
+    }
+
+    /// Activate moments content panel
+    fn activate_moments_content(&mut self) -> NavigationResult {
+        if self.selected_author_dynamics.is_some() {
+            self.set_input_mode(InputMode::ListNav);
+        }
+        NavigationResult::Handled
+    }
+
+    /// Activate detail page search panel
+    fn activate_detail_search(&mut self) -> NavigationResult {
+        self.set_input_mode(InputMode::Editing);
+        NavigationResult::Handled
+    }
+
     fn handle_list_navigation(&mut self, is_down: bool) -> NavigationResult {
         match self.navigation.current_page {
             ActivePage::Search => {
                 let current = self.results_list_state.selected().unwrap_or(0);
-                let new_index = if is_down {
-                    if current >= self.search_results.len().saturating_sub(1) { 0 } else { current + 1 }
-                } else if current == 0 { self.search_results.len().saturating_sub(1) } else { current - 1 };
+                let new_index = Self::calculate_next_index(current, self.search_results.len(), is_down);
                 self.results_list_state.select(Some(new_index));
                 NavigationResult::Handled
             }
             ActivePage::Moments => {
-                if self.navigation.focused_panel == Focusable::MomentsAuthors {
-                    if let Some(data) = &self.moments_data && !data.is_empty() {
-                        let current = self.selected_author.selected().unwrap_or(0);
-                        let new_index = if is_down {
-                            if current >= data.len().saturating_sub(1) { 0 } else { current + 1 }
-                        } else if current == 0 { data.len().saturating_sub(1) } else { current - 1 };
-                        self.selected_author.select(Some(new_index));
-
-                        // Load dynamics for selected author
-                        if let Some(author) = data.get(new_index) {
-                            let uid = author.user_profile.info.uid;
-
-                            // Check cache first
-                            if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
-                                self.selected_author_dynamics = Some(cached_dynamics.clone());
-                                self.dynamics_scroll_offset = 0;
-                                self.selected_dynamic_index = 0; // Reset dynamic selection
-                                self.add_message(format!("Loaded {} dynamics from cache", cached_dynamics.len()), MessageLevel::Info);
-                            } else {
-                                self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
-                                self.loading_dynamics = true;
-                                self.selected_author_dynamics = None;
-                                self.dynamics_scroll_offset = 0;
-                                self.selected_dynamic_index = 0; // Reset dynamic selection
-
-                                // Start async loading
-                                if let Some(ref tx) = self.dynamics_tx {
-                                    let tx = tx.clone();
-                                    tokio::spawn(async move {
-                                        match crate::api::get_user_dynamics(uid).await {
-                                            Ok(dynamics) => {
-                                                let _ = tx.send((uid, dynamics)).await;
-                                            }
-                                            Err(_) => {
-                                                // Could send error message through another channel if needed
-                                            }
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    }
-                } else if self.navigation.focused_panel == Focusable::MomentsContent {
-                    // Navigate dynamics content - move between dynamics
-                    if let Some(dynamics) = &self.selected_author_dynamics {
-                        if is_down {
-                            // Move to next dynamic
-                            if self.selected_dynamic_index + 1 < dynamics.len() {
-                                self.selected_dynamic_index += 1;
-                            }
-                        } else {
-                            // Move to previous dynamic
-                            if self.selected_dynamic_index > 0 {
-                                self.selected_dynamic_index -= 1;
-                            }
-                        }
-                    }
+                match self.navigation.focused_panel {
+                    Focusable::MomentsAuthors => self.handle_moments_authors_navigation(is_down),
+                    Focusable::MomentsContent => self.handle_moments_content_navigation(is_down),
+                    _ => NavigationResult::Continue,
                 }
-                NavigationResult::Handled
             }
             _ => NavigationResult::Continue,
         }
     }
 
     fn handle_content_scrolling(&mut self, is_down: bool) -> NavigationResult {
-        // Only allow content scrolling in moments content panel
         if self.navigation.current_page != ActivePage::Moments
             || self.navigation.focused_panel != Focusable::MomentsContent {
-            return NavigationResult::Continue;
-        }
+                return NavigationResult::Continue;
+            }
 
         if let Some(dynamics) = &self.selected_author_dynamics {
-            // Use simple scroll limit like the original implementation
             if is_down {
                 // Scroll content down
                 if self.dynamics_scroll_offset + 1 < dynamics.len() {
@@ -261,7 +379,6 @@ impl App {
                     self.dynamics_scroll_offset -= 1;
                 }
             }
-            // Sync selection with scroll offset
             self.selected_dynamic_index = self.dynamics_scroll_offset;
         }
 
@@ -291,61 +408,11 @@ impl App {
 
     fn handle_activate(&mut self) -> NavigationResult {
         match (self.navigation.current_page, self.navigation.focused_panel) {
-            (ActivePage::Search, Focusable::Search) => {
-                self.set_input_mode(InputMode::Editing);
-                NavigationResult::Handled
-            }
-            (ActivePage::Search, Focusable::Results) => {
-                if self.navigation.input_mode != InputMode::ListNav {
-                    self.set_input_mode(InputMode::ListNav);
-                } else {
-                    // In ListNav mode, Enter opens video details
-                    if let Some(selected_index) = self.results_list_state.selected()
-                        && let Some(video) = self.search_results.get(selected_index) {
-                            // Store basic video info, will be fully loaded in detail page
-                            self.video_info = Some(crate::api::VideoInfo {
-                                bvid: video.bvid.clone(),
-                                title: video.title.clone(),
-                                desc: video.description.clone(),
-                                owner: crate::api::Owner {
-                                    name: video.author.clone(),
-                                },
-                                stat: crate::api::Stat {
-                                    view: 0, // Will be populated when fully loaded
-                                    like: video.like,
-                                    coin: 0,
-                                    favorite: 0,
-                                    share: 0,
-                                },
-                            });
-                            self.set_active_page(ActivePage::Detail);
-                            self.set_input_mode(InputMode::Normal);
-                        }
-                }
-                NavigationResult::Handled
-            }
-            (ActivePage::Moments, Focusable::MomentsAuthors) => {
-                if self.moments_data.as_ref().is_some_and(|d| !d.is_empty()) {
-                    if self.navigation.input_mode != InputMode::ListNav {
-                        self.set_input_mode(InputMode::ListNav);
-                    } else {
-                        // In ListNav mode, Enter switches to content panel
-                        self.set_focused_panel(Focusable::MomentsContent);
-                        self.set_input_mode(InputMode::Normal);
-                    }
-                }
-                NavigationResult::Handled
-            }
-            (ActivePage::Moments, Focusable::MomentsContent) => {
-                if self.selected_author_dynamics.is_some() {
-                    self.set_input_mode(InputMode::ListNav);
-                }
-                NavigationResult::Handled
-            }
-            (ActivePage::Detail, Focusable::Search) => {
-                self.set_input_mode(InputMode::Editing);
-                NavigationResult::Handled
-            }
+            (ActivePage::Search, Focusable::Search) => self.activate_search_panel(),
+            (ActivePage::Search, Focusable::Results) => self.activate_results_panel(),
+            (ActivePage::Moments, Focusable::MomentsAuthors) => self.activate_moments_authors(),
+            (ActivePage::Moments, Focusable::MomentsContent) => self.activate_moments_content(),
+            (ActivePage::Detail, Focusable::Search) => self.activate_detail_search(),
             _ => NavigationResult::Continue,
         }
     }
@@ -402,21 +469,32 @@ impl App {
 
     async fn handle_help_mode(&mut self, key: crossterm::event::KeyEvent) -> std::io::Result<bool> {
         use crossterm::event::KeyCode;
+
+        // Handle scrolling keys with universal function
+        if handle_popup_scroll_keys(&mut self.overlays.help_scroll_offset, key) {
+            return Ok(false);
+        }
+
         match key.code {
+            // Mode controls
             KeyCode::Char(':') => {
                 self.overlays.command = true;
                 self.overlays.help = false;
+                self.overlays.help_scroll_offset = 0;
             }
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.overlays.help = false;
+                self.overlays.help_scroll_offset = 0;
             }
             KeyCode::Char('/') => {
                 self.overlays.help = false;
+                self.overlays.help_scroll_offset = 0;
                 self.set_focused_panel(Focusable::Search);
                 self.set_input_mode(InputMode::Editing);
             }
             KeyCode::Char('m') => {
                 self.overlays.help = false;
+                self.overlays.help_scroll_offset = 0;
                 let cmd = crate::command::Command::ShowMoments;
                 let _ = crate::command::execute(cmd, self).await;
             }
@@ -427,21 +505,32 @@ impl App {
 
     async fn handle_messages_mode(&mut self, key: crossterm::event::KeyEvent) -> std::io::Result<bool> {
         use crossterm::event::KeyCode;
+
+        // Handle scrolling keys with universal function
+        if handle_popup_scroll_keys(&mut self.overlays.messages_scroll_offset, key) {
+            return Ok(false);
+        }
+
         match key.code {
+            // Mode controls
             KeyCode::Char(':') => {
                 self.overlays.command = true;
                 self.overlays.messages = false;
+                self.overlays.messages_scroll_offset = 0;
             }
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.overlays.messages = false;
+                self.overlays.messages_scroll_offset = 0;
             }
             KeyCode::Char('/') => {
                 self.overlays.messages = false;
+                self.overlays.messages_scroll_offset = 0;
                 self.set_focused_panel(Focusable::Search);
                 self.set_input_mode(InputMode::Editing);
             }
             KeyCode::Char('m') => {
                 self.overlays.messages = false;
+                self.overlays.messages_scroll_offset = 0;
                 let cmd = crate::command::Command::ShowMoments;
                 let _ = crate::command::execute(cmd, self).await;
             }

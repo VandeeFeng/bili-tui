@@ -9,20 +9,36 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
-    // Left panel: Authors list
+    // Left panel: Authors list with sorting
     let authors: Vec<ListItem> = if let Some(data) = &app.moments_data {
-        data.iter().enumerate().map(|(index, author)| {
+        // Sort authors: favorites first, then others
+        let mut sorted_data: Vec<_> = data.iter().collect();
+        sorted_data.sort_by(|a, b| {
+            let a_is_favorite = app.following_config.is_favorite(a.user_profile.info.uid);
+            let b_is_favorite = app.following_config.is_favorite(b.user_profile.info.uid);
+            b_is_favorite.cmp(&a_is_favorite)
+        });
+
+        sorted_data.iter().enumerate().map(|(index, author)| {
             let author_name = &author.user_profile.info.uname;
             let uid = author.user_profile.info.uid;
+            let is_favorite = app.following_config.is_favorite(uid);
 
-            // Check if this author is selected
+            // Use the sorted index for selection
             let is_selected = app.selected_author.selected() == Some(index);
+
+            // Build the display name with star if favorite
+            let display_name = if is_favorite {
+                format!("⭐ {}", author_name)
+            } else {
+                author_name.clone()
+            };
 
             ListItem::new(Line::from(vec![
                 if is_selected {
-                    Span::styled(author_name.clone(), Style::default().fg(Color::Green))
+                    Span::styled(display_name, Style::default().fg(Color::Green))
                 } else {
-                    Span::raw(author_name.clone())
+                    Span::raw(display_name)
                 },
                 Span::from(" ").fg(Color::DarkGray),
                 Span::raw(format!("(UID: {})", uid)).fg(Color::DarkGray),

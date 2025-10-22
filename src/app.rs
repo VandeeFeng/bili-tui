@@ -106,6 +106,8 @@ pub struct OverlayState {
     pub command: bool,
     pub help: bool,
     pub messages: bool,
+    pub help_scroll_offset: usize,
+    pub messages_scroll_offset: usize,
 }
 
 impl OverlayState {
@@ -114,6 +116,8 @@ impl OverlayState {
             command: false,
             help: false,
             messages: false,
+            help_scroll_offset: 0,
+            messages_scroll_offset: 0,
         }
     }
 }

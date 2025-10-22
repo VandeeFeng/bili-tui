@@ -1,6 +1,6 @@
 [package]
 name = "bili-tui"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "A TUI client for Bilibili written in Rust."
 license = "MIT"

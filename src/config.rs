@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
+use serde::ser::SerializeStruct;
 use std::fs;
 use std::path::PathBuf;
 use crate::api::AuthorItem;
@@ -9,13 +10,32 @@ pub struct AuthorInfo {
     pub username: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[derive(Default)]
 pub struct FollowingConfig {
     pub enable_custom_following: bool,
+    #[serde(default)]
     pub custom_authors: Vec<AuthorInfo>,
+    #[serde(default)]
+    pub favorites: Vec<AuthorInfo>,
+    #[serde(default)]
     pub blacklist: Vec<AuthorInfo>,
     pub last_updated: u64,
+}
+
+impl Serialize for FollowingConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("FollowingConfig", 5)?;
+        state.serialize_field("enable_custom_following", &self.enable_custom_following)?;
+        state.serialize_field("custom_authors", &self.custom_authors)?;
+        state.serialize_field("favorites", &self.favorites)?;
+        state.serialize_field("blacklist", &self.blacklist)?;
+        state.serialize_field("last_updated", &self.last_updated)?;
+        state.end()
+    }
 }
 
 
@@ -30,7 +50,26 @@ impl FollowingConfig {
         }
 
         let content = fs::read_to_string(&config_path)?;
-        let config: FollowingConfig = serde_json::from_str(&content)?;
+
+        // Handle empty or invalid JSON file
+        if content.trim().is_empty() {
+            let config = FollowingConfig::default();
+            config.save()?;
+            return Ok(config);
+        }
+
+        let config: FollowingConfig = serde_json::from_str(&content)
+            .map_err(|e| {
+                format!("Invalid JSON in config file: {}. Creating new config.", e)
+            })?;
+
+        // For backwards compatibility: if the loaded config doesn't have the expected structure
+        // (e.g., missing favorites field), resave it to ensure all fields are present
+        // This will automatically add missing fields with default values due to #[serde(default)]
+        if !content.contains("\"favorites\"") {
+            config.save()?;
+        }
+
         Ok(config)
     }
 
@@ -103,6 +142,35 @@ impl FollowingConfig {
 
     pub fn is_blacklisted(&self, uid: u64) -> bool {
         self.blacklist.iter().any(|author| author.uid == uid)
+    }
+
+    pub fn add_favorite(&mut self, uid: u64, username: String) {
+        if let Some(pos) = self.favorites.iter().position(|author| author.uid == uid) {
+            self.favorites[pos].username = username;
+        } else {
+            self.favorites.push(AuthorInfo { uid, username });
+        }
+        self.last_updated = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+    }
+
+    pub fn remove_favorite(&mut self, uid: u64) -> bool {
+        let original_len = self.favorites.len();
+        self.favorites.retain(|author| author.uid != uid);
+        let was_removed = self.favorites.len() != original_len;
+
+        self.last_updated = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        was_removed
+    }
+
+    pub fn is_favorite(&self, uid: u64) -> bool {
+        self.favorites.iter().any(|author| author.uid == uid)
     }
 
     pub fn update_from_api_data(&mut self, authors: &[AuthorItem]) {

@@ -7,10 +7,13 @@ pub enum Command {
     PlayUrl(String),
     ShowVideoInfo(String),
     ShowMoments,
+    ShowFavorites,
     AddAuthor(u64, String),
     RemoveAuthor(u64),
     BanAuthor(u64, String),
     UnbanAuthor(u64),
+    FavoriteAuthor(u64, String),
+    UnfavoriteAuthor(u64),
     ListAuthors,
     RefreshAuthors,
     ToggleCustom,
@@ -43,6 +46,12 @@ pub fn parse(input: &str) -> Result<Command, String> {
             }
             Ok(Command::ShowMoments)
         }
+        "favorite" | "f" => {
+            if !args.is_empty() {
+                return Err("Usage: favorite (or f)".to_string());
+            }
+            Ok(Command::ShowFavorites)
+        }
         "add" => {
             if args.len() != 2 {
                 return Err("Usage: add <uid> <username>".to_string());
@@ -50,9 +59,9 @@ pub fn parse(input: &str) -> Result<Command, String> {
             let uid = args[0].parse().map_err(|_| "Invalid UID")?;
             Ok(Command::AddAuthor(uid, args[1].to_string()))
         }
-        "remove" => {
+        "rm" => {
             if args.len() != 1 {
-                return Err("Usage: remove <uid>".to_string());
+                return Err("Usage: rm <uid>".to_string());
             }
             let uid = args[0].parse().map_err(|_| "Invalid UID")?;
             Ok(Command::RemoveAuthor(uid))
@@ -70,6 +79,20 @@ pub fn parse(input: &str) -> Result<Command, String> {
             }
             let uid = args[0].parse().map_err(|_| "Invalid UID")?;
             Ok(Command::UnbanAuthor(uid))
+        }
+        "add_f" => {
+            if args.len() != 2 {
+                return Err("Usage: add_f <uid> <username>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::FavoriteAuthor(uid, args[1].to_string()))
+        }
+        "rm_f" => {
+            if args.len() != 1 {
+                return Err("Usage: rm_f <uid>".to_string());
+            }
+            let uid = args[0].parse().map_err(|_| "Invalid UID")?;
+            Ok(Command::UnfavoriteAuthor(uid))
         }
         "list" => {
             if !args.is_empty() {
@@ -198,6 +221,44 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 }
             }
         }
+        Command::ShowFavorites => {
+            app.add_message("Loading favorite authors...".to_string(), crate::app::MessageLevel::Info);
+
+            match api::get_moments().await {
+                Ok(all_authors) => {
+                    // Filter to only favorites in command layer
+                    let favorite_authors: Vec<_> = all_authors.into_iter()
+                        .filter(|author| {
+                            let uid = author.user_profile.info.uid;
+                            app.following_config.is_favorite(uid)
+                        })
+                        .collect();
+
+                    let count = favorite_authors.len();
+                    if count == 0 {
+                        app.add_message("No favorite authors found. Use 'favorite-add <uid> <username>' to add favorites.".to_string(), crate::app::MessageLevel::Warning);
+                        return Ok(());
+                    }
+                    app.moments_data = Some(favorite_authors);
+                    app.set_active_page(crate::app::ActivePage::Moments);
+                    app.set_input_mode(crate::app::InputMode::Normal);
+                    app.set_focused_panel(crate::app::Focusable::MomentsAuthors);
+
+                    if !app.moments_data.as_ref().unwrap().is_empty() {
+                        app.selected_author.select(Some(0));
+                        // Load dynamics for the first author
+                        fetch_first_author_dynamics(app).await;
+                    }
+                    app.add_message(format!("Loaded {} favorite authors", count), crate::app::MessageLevel::Success);
+                    Ok(())
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to load favorite authors: {}", e);
+                    app.add_message(error_msg.clone(), crate::app::MessageLevel::Error);
+                    Err(error_msg)
+                }
+            }
+        }
         Command::AddAuthor(uid, username) => {
             app.following_config.add_custom_author(uid, username.clone());
             if let Err(e) = app.following_config.save() {
@@ -236,6 +297,25 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::FavoriteAuthor(uid, username) => {
+            app.following_config.add_favorite(uid, username.clone());
+            if let Err(e) = app.following_config.save() {
+                return Err(format!("Failed to save config: {}", e));
+            }
+            app.add_message(format!("Added to favorites: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            Ok(())
+        }
+        Command::UnfavoriteAuthor(uid) => {
+            if app.following_config.remove_favorite(uid) {
+                if let Err(e) = app.following_config.save() {
+                    return Err(format!("Failed to save config: {}", e));
+                }
+                app.add_message(format!("Removed from favorites: UID {}", uid), crate::app::MessageLevel::Success);
+            } else {
+                app.add_message(format!("Author with UID {} not found in favorites", uid), crate::app::MessageLevel::Warning);
+            }
+            Ok(())
+        }
         Command::ListAuthors => {
             let status = if app.following_config.enable_custom_following {
                 "Custom following (ON)"
@@ -244,11 +324,44 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             };
             app.add_message(format!("Following status: {}", status), crate::app::MessageLevel::Info);
 
-            if app.following_config.enable_custom_following && !app.following_config.custom_authors.is_empty() {
-                app.add_message("Custom authors:".to_string(), crate::app::MessageLevel::Info);
-                let authors = app.following_config.custom_authors.clone();
-                for author in &authors {
-                    app.add_message(format!("  - {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Info);
+            if !app.following_config.favorites.is_empty() {
+                app.add_message("⭐ Favorite authors:".to_string(), crate::app::MessageLevel::Info);
+                let favorites = app.following_config.favorites.clone();
+                for author in &favorites {
+                    app.add_message(format!("  - ⭐ {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Info);
+                }
+            }
+
+            if app.following_config.enable_custom_following {
+                // Show custom authors if custom mode is enabled
+                if !app.following_config.custom_authors.is_empty() {
+                    app.add_message("Custom authors:".to_string(), crate::app::MessageLevel::Info);
+                    let authors = app.following_config.custom_authors.clone();
+                    for author in &authors {
+                        let star = if app.following_config.is_favorite(author.uid) { "⭐ " } else { "" };
+                        app.add_message(format!("  - {}{} (UID: {})", star, author.username, author.uid), crate::app::MessageLevel::Info);
+                    }
+                }
+            } else {
+                // In API mode, show cached moments data if available
+                if app.moments_data.is_some() {
+                    app.add_message("Following authors:".to_string(), crate::app::MessageLevel::Info);
+
+                    // Get favorites for star display
+                    let favorite_uids: std::collections::HashSet<_> = app.following_config.favorites.iter()
+                        .map(|author| author.uid)
+                        .collect();
+
+                    // Get a reference to moments_data and clone it to avoid borrowing issues
+                    let moments_data_clone = app.moments_data.clone();
+                    if let Some(moments_data) = moments_data_clone {
+                        for author in &moments_data {
+                            let star = if favorite_uids.contains(&author.user_profile.info.uid) { "⭐ " } else { "" };
+                            app.add_message(format!("  - {}{} (UID: {})", star, author.user_profile.info.uname, author.user_profile.info.uid), crate::app::MessageLevel::Info);
+                        }
+                    }
+                } else {
+                    app.add_message("No cached author data. Use 'moments' command to load following authors.".to_string(), crate::app::MessageLevel::Warning);
                 }
             }
 
@@ -260,8 +373,8 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 }
             }
 
-            if app.following_config.custom_authors.is_empty() && app.following_config.blacklist.is_empty() {
-                app.add_message("No custom authors or blacklist configured".to_string(), crate::app::MessageLevel::Info);
+            if app.following_config.custom_authors.is_empty() && app.following_config.blacklist.is_empty() && app.following_config.favorites.is_empty() && app.moments_data.is_none() {
+                app.add_message("No author data available. Use 'moments' command to load following authors.".to_string(), crate::app::MessageLevel::Info);
             }
             Ok(())
         }
