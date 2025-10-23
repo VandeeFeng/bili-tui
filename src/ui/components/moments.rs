@@ -9,22 +9,14 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
-    // Left panel: Authors list with sorting
+    // Left panel: Authors list (data is already sorted in command layer)
     let authors: Vec<ListItem> = if let Some(data) = &app.moments_data {
-        // Sort authors: favorites first, then others
-        let mut sorted_data: Vec<_> = data.iter().collect();
-        sorted_data.sort_by(|a, b| {
-            let a_is_favorite = app.following_config.is_favorite(a.user_profile.info.uid);
-            let b_is_favorite = app.following_config.is_favorite(b.user_profile.info.uid);
-            b_is_favorite.cmp(&a_is_favorite)
-        });
-
-        sorted_data.iter().enumerate().map(|(index, author)| {
+        data.iter().enumerate().map(|(index, author)| {
             let author_name = &author.user_profile.info.uname;
             let uid = author.user_profile.info.uid;
             let is_favorite = app.following_config.is_favorite(uid);
 
-            // Use the sorted index for selection
+            // Use the index directly since data is already sorted
             let is_selected = app.selected_author.selected() == Some(index);
 
             // Build the display name with star if favorite

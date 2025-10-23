@@ -194,7 +194,14 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             app.add_message("Loading moments...".to_string(), crate::app::MessageLevel::Info);
 
             match api::get_moments().await {
-                Ok(authors) => {
+                Ok(mut authors) => {
+                    // Sort authors: favorites first, then others
+                    authors.sort_by(|a, b| {
+                        let a_is_favorite = app.following_config.is_favorite(a.user_profile.info.uid);
+                        let b_is_favorite = app.following_config.is_favorite(b.user_profile.info.uid);
+                        b_is_favorite.cmp(&a_is_favorite)
+                    });
+
                     let count = authors.len();
                     app.moments_data = Some(authors);
                     app.set_active_page(crate::app::ActivePage::Moments);
