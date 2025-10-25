@@ -4,6 +4,8 @@ A TUI client for Bilibili written in Rust, created as a practice project. It pro
 
 Inspired by: [Siriusmart/youtube-tui: An aesthetically pleasing YouTube TUI written in Rust](https://github.com/Siriusmart/youtube-tui)
 
+![bili-tui](assets/bili-tui.png)
+
 ## Features
 
 - **Video Search**: Search for Bilibili videos directly within the application.
@@ -36,6 +38,7 @@ Ensure you have the following software installed on your system:
     ```
 
 ### From Source
+For the latest:
 
 1.  Clone the repository:
     ```bash
