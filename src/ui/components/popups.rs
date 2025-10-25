@@ -28,7 +28,11 @@ fn render_scrollable_popup(
     let visible_content: Vec<Line> = if scroll_offset < content.len() {
         content[scroll_offset..end_line].to_vec()
     } else {
-        content[content.len().saturating_sub(visible_height).min(content.len())..content.len()].to_vec()
+        content[content
+            .len()
+            .saturating_sub(visible_height)
+            .min(content.len())..content.len()]
+            .to_vec()
     };
 
     let content_panel = Paragraph::new(visible_content)
@@ -43,7 +47,6 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
     let help_text = vec![
         Line::from("Bili-TUI - Bilibili Terminal UI Help".bold().cyan()),
         Line::from(""),
-
         Line::from("Global Shortcuts:".bold().yellow()),
         Line::from("  /                  - Search (global shortcut)"),
         Line::from("  m                  - Moments/Following updates"),
@@ -52,14 +55,12 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  ?                  - Show this help"),
         Line::from("  q/Esc              - Exit current mode or quit"),
         Line::from(""),
-
         Line::from("Navigation:".bold().yellow()),
         Line::from("  j/k                - Move focus between panels"),
         Line::from("  h/l                - Switch panels (in Moments mode)"),
         Line::from("  ←/→               - Switch panels (alternative)"),
         Line::from("  Enter              - Activate/Select current panel"),
         Line::from(""),
-
         Line::from("Commands:".bold().yellow()),
         Line::from("  video <url>        - Play video with mpv"),
         Line::from("  video-info <url>   - Show video details"),
@@ -77,14 +78,12 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  help               - Show this help message"),
         Line::from("  q                  - Quit the application"),
         Line::from(""),
-
         Line::from("Search Mode:".bold().yellow()),
         Line::from("  /                  - Start searching"),
         Line::from("  Enter (editing)    - Execute search"),
         Line::from("  ↓/j/k/↑           - Navigate results"),
         Line::from("  Enter (results)    - View video details"),
         Line::from(""),
-
         Line::from("Moments Mode:".bold().yellow()),
         Line::from("  j/k / ↑/↓          - Navigate authors or dynamics list (selection)"),
         Line::from("  h/l                - Switch between author/content panels"),
@@ -93,13 +92,11 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  p                  - Play selected dynamic video"),
         Line::from("  q/Esc              - Exit moments mode"),
         Line::from(""),
-
         Line::from("Detail View:".bold().yellow()),
         Line::from("  p                  - Play current video"),
         Line::from("  j/k                - Move focus between panels"),
         Line::from("  q/Esc              - Return to search"),
         Line::from(""),
-
         Line::from("Popup Navigation:".bold().yellow()),
         Line::from("  In Help/Messages popups:"),
         Line::from("    j/k, ↑/↓         - Scroll content"),
@@ -108,11 +105,17 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("    :                  - Switch to command"),
         Line::from("    m                  - Switch to moments"),
         Line::from(""),
-
         Line::from("Press q/Esc to close help".italic().gray()),
     ];
 
-    render_scrollable_popup(f, app, &help_text, "Help", Color::Cyan, app.overlays.help_scroll_offset);
+    render_scrollable_popup(
+        f,
+        app,
+        &help_text,
+        "Help",
+        Color::Cyan,
+        app.overlays.help_scroll_offset,
+    );
 }
 
 pub fn render_command_popup(f: &mut Frame, app: &mut App) {
@@ -125,12 +128,10 @@ pub fn render_command_popup(f: &mut Frame, app: &mut App) {
         .block(app.create_popup_block("Command", Color::Green));
     f.render_widget(command_popup, popup_area);
 
-    f.set_cursor_position(
-        (
-            popup_area.x + app.command_input.visual_cursor() as u16 + 1,
-            popup_area.y + 1,
-        )
-    );
+    f.set_cursor_position((
+        popup_area.x + app.command_input.visual_cursor() as u16 + 1,
+        popup_area.y + 1,
+    ));
 }
 
 pub fn render_messages_popup(f: &mut Frame, app: &App) {
@@ -173,15 +174,22 @@ pub fn render_messages_popup(f: &mut Frame, app: &App) {
     message_lines.push(Line::from("  j/k, ↑/↓           - Scroll messages"));
     message_lines.push(Line::from("  q/Esc              - Close messages"));
 
-    render_scrollable_popup(f, app, &message_lines, "Messages", Color::Cyan, app.overlays.messages_scroll_offset);
+    render_scrollable_popup(
+        f,
+        app,
+        &message_lines,
+        "Messages",
+        Color::Cyan,
+        app.overlays.messages_scroll_offset,
+    );
 }
 
 pub fn render_error_popup(f: &mut Frame, app: &App) {
     if let Some(error) = &app.last_error {
         let popup_area = app.calculate_popup_area(f.area(), 60, 3);
 
-        let error_popup = Paragraph::new(error.as_str())
-            .block(app.create_popup_block("Error", Color::Red));
+        let error_popup =
+            Paragraph::new(error.as_str()).block(app.create_popup_block("Error", Color::Red));
         f.render_widget(error_popup, popup_area);
     }
 }

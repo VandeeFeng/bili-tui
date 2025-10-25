@@ -65,22 +65,17 @@ impl MessageRenderer for App {
     fn render_message_bar(&self, f: &mut Frame, area: Rect, app: &App) {
         if let Some(message) = app.get_latest_message() {
             let style = self.get_message_style(&message.level);
-            let message_bar = Paragraph::new(message.text.clone())
-                .block(
-                    Block::default()
-                        .title("Messages")
-                        .borders(Borders::ALL)
-                        .border_style(style),
-                );
+            let message_bar = Paragraph::new(message.text.clone()).block(
+                Block::default()
+                    .title("Messages")
+                    .borders(Borders::ALL)
+                    .border_style(style),
+            );
             f.render_widget(message_bar, area);
         } else {
             // Render empty message bar
-            let empty_message_bar = Paragraph::new("")
-                .block(
-                    Block::default()
-                        .title("Messages")
-                        .borders(Borders::ALL),
-                );
+            let empty_message_bar =
+                Paragraph::new("").block(Block::default().title("Messages").borders(Borders::ALL));
             f.render_widget(empty_message_bar, area);
         }
     }

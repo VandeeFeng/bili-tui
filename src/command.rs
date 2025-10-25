@@ -1,5 +1,5 @@
-use crate::app::App;
 use crate::api;
+use crate::app::App;
 use url::Url;
 
 #[derive(Debug, PartialEq)]
@@ -124,14 +124,15 @@ fn extract_bvid(input: &str) -> Option<String> {
     }
     if let Ok(url) = Url::parse(input)
         && let Some(domain) = url.domain()
-            && domain.ends_with("bilibili.com")
-                && let Some(path_segments) = url.path_segments() {
-                    for segment in path_segments {
-                        if segment.starts_with("BV") {
-                            return Some(segment.to_string());
-                        }
-                    }
-                }
+        && domain.ends_with("bilibili.com")
+        && let Some(path_segments) = url.path_segments()
+    {
+        for segment in path_segments {
+            if segment.starts_with("BV") {
+                return Some(segment.to_string());
+            }
+        }
+    }
     None
 }
 
@@ -152,17 +153,22 @@ async fn fetch_first_author_dynamics(app: &mut App) {
         Ok(dynamics) => {
             let count = dynamics.len();
             app.selected_author_dynamics = Some(dynamics);
-            app.add_message(format!("Loaded {} dynamics", count), crate::app::MessageLevel::Success);
+            app.add_message(
+                format!("Loaded {} dynamics", count),
+                crate::app::MessageLevel::Success,
+            );
         }
         Err(e) => {
-            app.add_message(format!("Failed to load dynamics: {}", e), crate::app::MessageLevel::Error);
+            app.add_message(
+                format!("Failed to load dynamics: {}", e),
+                crate::app::MessageLevel::Error,
+            );
             app.selected_author_dynamics = None;
         }
     }
 
     app.loading_dynamics = false;
 }
-
 
 pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
     match command {
@@ -191,7 +197,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
         }
         Command::ShowMoments => {
-            app.add_message("Loading moments...".to_string(), crate::app::MessageLevel::Info);
+            app.add_message(
+                "Loading moments...".to_string(),
+                crate::app::MessageLevel::Info,
+            );
 
             match api::get_moments().await {
                 Ok(following_authors) => {
@@ -209,7 +218,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                         // Load dynamics for the first author
                         fetch_first_author_dynamics(app).await;
                     }
-                    app.add_message(format!("Moments loaded successfully: {} authors found", count), crate::app::MessageLevel::Success);
+                    app.add_message(
+                        format!("Moments loaded successfully: {} authors found", count),
+                        crate::app::MessageLevel::Success,
+                    );
                     Ok(())
                 }
                 Err(e) => {
@@ -225,7 +237,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
         }
         Command::ShowFavorites => {
-            app.add_message("Loading favorite authors...".to_string(), crate::app::MessageLevel::Info);
+            app.add_message(
+                "Loading favorite authors...".to_string(),
+                crate::app::MessageLevel::Info,
+            );
 
             // Use favorites directly, no need to fetch from API
             let favorite_authors = app.following_config.to_favorite_author_items();
@@ -246,15 +261,22 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 // Load dynamics for the first author
                 fetch_first_author_dynamics(app).await;
             }
-            app.add_message(format!("Loaded {} favorite authors", count), crate::app::MessageLevel::Success);
+            app.add_message(
+                format!("Loaded {} favorite authors", count),
+                crate::app::MessageLevel::Success,
+            );
             Ok(())
         }
         Command::AddAuthor(uid, username) => {
-            app.following_config.add_custom_author(uid, username.clone());
+            app.following_config
+                .add_custom_author(uid, username.clone());
             if let Err(e) = app.following_config.save() {
                 return Err(format!("Failed to save config: {}", e));
             }
-            app.add_message(format!("Added author: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            app.add_message(
+                format!("Added author: {} (UID: {})", username, uid),
+                crate::app::MessageLevel::Success,
+            );
             Ok(())
         }
         Command::RemoveAuthor(uid) => {
@@ -262,9 +284,15 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 if let Err(e) = app.following_config.save() {
                     return Err(format!("Failed to save config: {}", e));
                 }
-                app.add_message(format!("Removed author with UID: {}", uid), crate::app::MessageLevel::Success);
+                app.add_message(
+                    format!("Removed author with UID: {}", uid),
+                    crate::app::MessageLevel::Success,
+                );
             } else {
-                app.add_message(format!("Author with UID {} not found", uid), crate::app::MessageLevel::Warning);
+                app.add_message(
+                    format!("Author with UID {} not found", uid),
+                    crate::app::MessageLevel::Warning,
+                );
             }
             Ok(())
         }
@@ -273,7 +301,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             if let Err(e) = app.following_config.save() {
                 return Err(format!("Failed to save config: {}", e));
             }
-            app.add_message(format!("Banned author: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            app.add_message(
+                format!("Banned author: {} (UID: {})", username, uid),
+                crate::app::MessageLevel::Success,
+            );
             Ok(())
         }
         Command::UnbanAuthor(uid) => {
@@ -281,9 +312,15 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 if let Err(e) = app.following_config.save() {
                     return Err(format!("Failed to save config: {}", e));
                 }
-                app.add_message(format!("Unbanned author with UID: {}", uid), crate::app::MessageLevel::Success);
+                app.add_message(
+                    format!("Unbanned author with UID: {}", uid),
+                    crate::app::MessageLevel::Success,
+                );
             } else {
-                app.add_message(format!("Author with UID {} not found in blacklist", uid), crate::app::MessageLevel::Warning);
+                app.add_message(
+                    format!("Author with UID {} not found in blacklist", uid),
+                    crate::app::MessageLevel::Warning,
+                );
             }
             Ok(())
         }
@@ -292,7 +329,10 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             if let Err(e) = app.following_config.save() {
                 return Err(format!("Failed to save config: {}", e));
             }
-            app.add_message(format!("Added to favorites: {} (UID: {})", username, uid), crate::app::MessageLevel::Success);
+            app.add_message(
+                format!("Added to favorites: {} (UID: {})", username, uid),
+                crate::app::MessageLevel::Success,
+            );
             Ok(())
         }
         Command::UnfavoriteAuthor(uid) => {
@@ -300,9 +340,15 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 if let Err(e) = app.following_config.save() {
                     return Err(format!("Failed to save config: {}", e));
                 }
-                app.add_message(format!("Removed from favorites: UID {}", uid), crate::app::MessageLevel::Success);
+                app.add_message(
+                    format!("Removed from favorites: UID {}", uid),
+                    crate::app::MessageLevel::Success,
+                );
             } else {
-                app.add_message(format!("Author with UID {} not found in favorites", uid), crate::app::MessageLevel::Warning);
+                app.add_message(
+                    format!("Author with UID {} not found in favorites", uid),
+                    crate::app::MessageLevel::Warning,
+                );
             }
             Ok(())
         }
@@ -312,33 +358,58 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             } else {
                 "API following (Custom OFF)"
             };
-            app.add_message(format!("Following status: {}", status), crate::app::MessageLevel::Info);
+            app.add_message(
+                format!("Following status: {}", status),
+                crate::app::MessageLevel::Info,
+            );
 
             if !app.following_config.favorites.is_empty() {
-                app.add_message("⭐ Favorite authors:".to_string(), crate::app::MessageLevel::Info);
+                app.add_message(
+                    "⭐ Favorite authors:".to_string(),
+                    crate::app::MessageLevel::Info,
+                );
                 let favorites = app.following_config.favorites.clone();
                 for author in &favorites {
-                    app.add_message(format!("  - ⭐ {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Info);
+                    app.add_message(
+                        format!("  - ⭐ {} (UID: {})", author.username, author.uid),
+                        crate::app::MessageLevel::Info,
+                    );
                 }
             }
 
             if app.following_config.enable_custom_following {
                 // Show custom authors if custom mode is enabled
                 if !app.following_config.custom_authors.is_empty() {
-                    app.add_message("Custom authors:".to_string(), crate::app::MessageLevel::Info);
+                    app.add_message(
+                        "Custom authors:".to_string(),
+                        crate::app::MessageLevel::Info,
+                    );
                     let authors = app.following_config.custom_authors.clone();
                     for author in &authors {
-                        let star = if app.following_config.is_favorite(author.uid) { "⭐ " } else { "" };
-                        app.add_message(format!("  - {}{} (UID: {})", star, author.username, author.uid), crate::app::MessageLevel::Info);
+                        let star = if app.following_config.is_favorite(author.uid) {
+                            "⭐ "
+                        } else {
+                            ""
+                        };
+                        app.add_message(
+                            format!("  - {}{} (UID: {})", star, author.username, author.uid),
+                            crate::app::MessageLevel::Info,
+                        );
                     }
                 }
             } else {
                 // In API mode, show cached moments data if available
                 if app.moments_data.is_some() {
-                    app.add_message("Following authors:".to_string(), crate::app::MessageLevel::Info);
+                    app.add_message(
+                        "Following authors:".to_string(),
+                        crate::app::MessageLevel::Info,
+                    );
 
                     // Get favorites for star display
-                    let favorite_uids: std::collections::HashSet<_> = app.following_config.favorites.iter()
+                    let favorite_uids: std::collections::HashSet<_> = app
+                        .following_config
+                        .favorites
+                        .iter()
                         .map(|author| author.uid)
                         .collect();
 
@@ -346,25 +417,55 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                     let moments_data_clone = app.moments_data.clone();
                     if let Some(moments_data) = moments_data_clone {
                         for author in &moments_data {
-                            let star = if favorite_uids.contains(&author.user_profile.info.uid) { "⭐ " } else { "" };
-                            app.add_message(format!("  - {}{} (UID: {})", star, author.user_profile.info.uname, author.user_profile.info.uid), crate::app::MessageLevel::Info);
+                            let star = if favorite_uids.contains(&author.user_profile.info.uid) {
+                                "⭐ "
+                            } else {
+                                ""
+                            };
+                            app.add_message(
+                                format!(
+                                    "  - {}{} (UID: {})",
+                                    star,
+                                    author.user_profile.info.uname,
+                                    author.user_profile.info.uid
+                                ),
+                                crate::app::MessageLevel::Info,
+                            );
                         }
                     }
                 } else {
-                    app.add_message("No cached author data. Use 'moments' command to load following authors.".to_string(), crate::app::MessageLevel::Warning);
+                    app.add_message(
+                        "No cached author data. Use 'moments' command to load following authors."
+                            .to_string(),
+                        crate::app::MessageLevel::Warning,
+                    );
                 }
             }
 
             if !app.following_config.blacklist.is_empty() {
-                app.add_message("Blacklisted authors:".to_string(), crate::app::MessageLevel::Warning);
+                app.add_message(
+                    "Blacklisted authors:".to_string(),
+                    crate::app::MessageLevel::Warning,
+                );
                 let blacklist = app.following_config.blacklist.clone();
                 for author in &blacklist {
-                    app.add_message(format!("  - {} (UID: {})", author.username, author.uid), crate::app::MessageLevel::Warning);
+                    app.add_message(
+                        format!("  - {} (UID: {})", author.username, author.uid),
+                        crate::app::MessageLevel::Warning,
+                    );
                 }
             }
 
-            if app.following_config.custom_authors.is_empty() && app.following_config.blacklist.is_empty() && app.following_config.favorites.is_empty() && app.moments_data.is_none() {
-                app.add_message("No author data available. Use 'moments' command to load following authors.".to_string(), crate::app::MessageLevel::Info);
+            if app.following_config.custom_authors.is_empty()
+                && app.following_config.blacklist.is_empty()
+                && app.following_config.favorites.is_empty()
+                && app.moments_data.is_none()
+            {
+                app.add_message(
+                    "No author data available. Use 'moments' command to load following authors."
+                        .to_string(),
+                    crate::app::MessageLevel::Info,
+                );
             }
             Ok(())
         }
@@ -373,11 +474,17 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
                 return Err("Cannot refresh authors while custom following is enabled. Use 'toggle-custom' to disable custom following first.".to_string());
             }
 
-            app.add_message("Refreshing authors from API...".to_string(), crate::app::MessageLevel::Info);
+            app.add_message(
+                "Refreshing authors from API...".to_string(),
+                crate::app::MessageLevel::Info,
+            );
             match api::get_moments().await {
                 Ok(authors) => {
                     let count = authors.len();
-                    app.add_message(format!("Refreshed {} authors from API", count), crate::app::MessageLevel::Success);
+                    app.add_message(
+                        format!("Refreshed {} authors from API", count),
+                        crate::app::MessageLevel::Success,
+                    );
                     Ok(())
                 }
                 Err(e) => {
@@ -388,7 +495,8 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             }
         }
         Command::ToggleCustom => {
-            app.following_config.enable_custom_following = !app.following_config.enable_custom_following;
+            app.following_config.enable_custom_following =
+                !app.following_config.enable_custom_following;
             if let Err(e) = app.following_config.save() {
                 return Err(format!("Failed to save config: {}", e));
             }
@@ -404,8 +512,6 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             app.overlays.help = true;
             Ok(())
         }
-        Command::Quit => {
-            Ok(())
-        }
+        Command::Quit => Ok(()),
     }
 }

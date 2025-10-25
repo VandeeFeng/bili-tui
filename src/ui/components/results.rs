@@ -59,7 +59,7 @@ pub fn render_results_panel(f: &mut Frame, area: Rect, app: &mut App) {
             ratatui::widgets::Block::default()
                 .title("Results")
                 .borders(ratatui::widgets::Borders::ALL)
-                .border_style(Style::default().fg(block_color))
+                .border_style(Style::default().fg(block_color)),
         )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");

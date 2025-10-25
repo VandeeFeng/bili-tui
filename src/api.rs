@@ -15,8 +15,12 @@ impl BilibiliClient {
         Ok(Self { client, sessdata })
     }
 
-    async fn get_and_parse<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-        let response = self.client
+    async fn get_and_parse<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self
+            .client
             .get(url)
             .header("Cookie", format!("SESSDATA={}", self.sessdata))
             .send()
@@ -24,13 +28,16 @@ impl BilibiliClient {
 
         let body_text = response.text().await?;
         serde_json::from_str(&body_text).map_err(|e| {
-            format!("error decoding response body: {e}. Raw response: {body_text}")
-                .into()
+            format!("error decoding response body: {e}. Raw response: {body_text}").into()
         })
     }
 
-    async fn get_and_check<T: serde::de::DeserializeOwned>(&self, url: &str) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
-        let response = self.client
+    async fn get_and_check<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+    ) -> Result<T, Box<dyn std::error::Error + Send + Sync>> {
+        let response = self
+            .client
             .get(url)
             .header("Cookie", format!("SESSDATA={}", self.sessdata))
             .send()
@@ -40,12 +47,17 @@ impl BilibiliClient {
         let body_text = response.text().await?;
 
         if !status.is_success() {
-            return Err(format!("HTTP error {}: {}. Response body: {}", status.as_u16(), status.canonical_reason().unwrap_or("Unknown"), body_text).into());
+            return Err(format!(
+                "HTTP error {}: {}. Response body: {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("Unknown"),
+                body_text
+            )
+            .into());
         }
 
         serde_json::from_str(&body_text).map_err(|e| {
-            format!("error decoding response body: {e}. Raw response: {body_text}")
-                .into()
+            format!("error decoding response body: {e}. Raw response: {body_text}").into()
         })
     }
 }
@@ -114,7 +126,9 @@ where
     Ok(s.replace("<em class=\"keyword\">", "").replace("</em>", ""))
 }
 
-pub async fn search(keyword: &str) -> Result<Vec<VideoResult>, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn search(
+    keyword: &str,
+) -> Result<Vec<VideoResult>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
         "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={}",
         keyword
@@ -132,7 +146,9 @@ pub async fn search(keyword: &str) -> Result<Vec<VideoResult>, Box<dyn std::erro
     Ok(videos)
 }
 
-pub async fn get_video_info(bvid: &str) -> Result<VideoInfo, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_video_info(
+    bvid: &str,
+) -> Result<VideoInfo, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
         "https://api.bilibili.com/x/web-interface/view?bvid={}",
         bvid
@@ -148,7 +164,6 @@ pub struct UserInfo {
     pub uid: u64,
     pub uname: String,
 }
-
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct AuthorItem {
@@ -173,9 +188,6 @@ struct MomentsData {
     items: Vec<AuthorItem>,
 }
 
-
-
-
 pub async fn get_moments() -> Result<Vec<AuthorItem>, Box<dyn std::error::Error + Send + Sync>> {
     let config = crate::config::FollowingConfig::load()?;
 
@@ -188,12 +200,17 @@ pub async fn get_moments() -> Result<Vec<AuthorItem>, Box<dyn std::error::Error 
     let mut authors = load_moments_from_cache().unwrap_or_default();
 
     if authors.is_empty() {
-        let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
+        let url =
+            "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
         let client = BilibiliClient::new()?;
         let api_response: MomentsResponse = client.get_and_check(url).await?;
 
         if api_response.code != 0 {
-            return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
+            return Err(format!(
+                "API returned error code {}: {}",
+                api_response.code, api_response.message
+            )
+            .into());
         }
 
         authors = api_response.data.items;
@@ -212,7 +229,9 @@ fn load_moments_from_cache() -> Option<Vec<AuthorItem>> {
     Some(config.to_author_items())
 }
 
-fn save_moments_to_cache(authors: &[AuthorItem]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn save_moments_to_cache(
+    authors: &[AuthorItem],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut config = crate::config::FollowingConfig::load()?;
     config.update_from_api_data(authors);
     config.save()?;
@@ -309,7 +328,9 @@ pub struct AuthorDynamic {
 
 // Function to get dynamics for a specific user using space API
 // Search for a video by title and return its bvid
-pub async fn search_video_by_title(title: &str) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn search_video_by_title(
+    title: &str,
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
     let videos = search(title).await?;
 
     // Return the bvid of the first video that matches the title exactly
@@ -327,7 +348,9 @@ pub async fn search_video_by_title(title: &str) -> Result<Option<String>, Box<dy
     }
 }
 
-pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_user_dynamics(
+    uid: u64,
+) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
     let url = format!(
         "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={}",
         uid
@@ -336,32 +359,44 @@ pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn s
     let api_response: SpaceDynamicResponse = client.get_and_check(&url).await?;
 
     if api_response.code != 0 {
-        return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
+        return Err(format!(
+            "API returned error code {}: {}",
+            api_response.code, api_response.message
+        )
+        .into());
     }
 
-    let mut dynamics: Vec<AuthorDynamic> = api_response.data.items.into_iter().map(|item| {
-        let author = &item.modules.module_author;
-        let dynamic_content = &item.modules.module_dynamic;
+    let mut dynamics: Vec<AuthorDynamic> = api_response
+        .data
+        .items
+        .into_iter()
+        .map(|item| {
+            let author = &item.modules.module_author;
+            let dynamic_content = &item.modules.module_dynamic;
 
-        let content = dynamic_content.desc.as_ref()
-            .map(|desc| desc.text.clone())
-            .unwrap_or_default();
+            let content = dynamic_content
+                .desc
+                .as_ref()
+                .map(|desc| desc.text.clone())
+                .unwrap_or_default();
 
-        let video_info = dynamic_content.major.as_ref()
-            .and_then(|major| major.archive.clone());
+            let video_info = dynamic_content
+                .major
+                .as_ref()
+                .and_then(|major| major.archive.clone());
 
-        AuthorDynamic {
-            content,
-            timestamp: author.pub_ts,
-            author_name: author.name.clone(),
-            stats: item.modules.module_stat,
-            video_info,
-        }
-    }).collect();
+            AuthorDynamic {
+                content,
+                timestamp: author.pub_ts,
+                author_name: author.name.clone(),
+                stats: item.modules.module_stat,
+                video_info,
+            }
+        })
+        .collect();
 
     // Sort dynamics by timestamp in descending order (newest first)
     dynamics.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     Ok(dynamics)
 }
-

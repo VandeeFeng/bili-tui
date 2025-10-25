@@ -1,5 +1,8 @@
-use crate::app::{App, NavigationHandler, NavigationAction, NavigationResult, ActivePage, Focusable, InputMode, MessageLevel};
-use ratatui::crossterm::event::{KeyEvent as RatatuiKeyEvent};
+use crate::app::{
+    ActivePage, App, Focusable, InputMode, MessageLevel, NavigationAction, NavigationHandler,
+    NavigationResult,
+};
+use ratatui::crossterm::event::KeyEvent as RatatuiKeyEvent;
 use std::io;
 
 // Convert crossterm event to ratatui's crossterm event for input handling
@@ -7,15 +10,33 @@ fn convert_key_event_for_input(key: crossterm::event::KeyEvent) -> RatatuiKeyEve
     use std::mem::transmute;
 
     RatatuiKeyEvent {
-        code: unsafe { transmute::<crossterm::event::KeyCode, ratatui::crossterm::event::KeyCode>(key.code) },
-        modifiers: unsafe { transmute::<crossterm::event::KeyModifiers, ratatui::crossterm::event::KeyModifiers>(key.modifiers) },
-        kind: unsafe { transmute::<crossterm::event::KeyEventKind, ratatui::crossterm::event::KeyEventKind>(key.kind) },
-        state: unsafe { transmute::<crossterm::event::KeyEventState, ratatui::crossterm::event::KeyEventState>(key.state) },
+        code: unsafe {
+            transmute::<crossterm::event::KeyCode, ratatui::crossterm::event::KeyCode>(key.code)
+        },
+        modifiers: unsafe {
+            transmute::<crossterm::event::KeyModifiers, ratatui::crossterm::event::KeyModifiers>(
+                key.modifiers,
+            )
+        },
+        kind: unsafe {
+            transmute::<crossterm::event::KeyEventKind, ratatui::crossterm::event::KeyEventKind>(
+                key.kind,
+            )
+        },
+        state: unsafe {
+            transmute::<crossterm::event::KeyEventState, ratatui::crossterm::event::KeyEventState>(
+                key.state,
+            )
+        },
     }
 }
 
 /// Main keyboard event handler - delegates to App's NavigationHandler implementation
-pub async fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> io::Result<bool> {
+pub async fn handle_key_event(
+    app: &mut App,
+    key: crossterm::event::KeyEvent,
+    tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>,
+) -> io::Result<bool> {
     app.handle_key(key, tx).await
 }
 
@@ -39,7 +60,11 @@ fn handle_popup_scroll_keys(scroll_offset: &mut usize, key: crossterm::event::Ke
 }
 
 impl NavigationHandler for App {
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<bool> {
+    async fn handle_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>,
+    ) -> std::io::Result<bool> {
         use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 
         if key.kind != KeyEventKind::Press {
@@ -74,14 +99,40 @@ impl NavigationHandler for App {
             KeyCode::Char('j') if self.can_navigate_panels() => NavigationAction::PanelNext,
             KeyCode::Char('k') if self.can_navigate_panels() => NavigationAction::PanelPrev,
             // Content scrolling in Moments view (specific)
-            KeyCode::Up if key.modifiers == KeyModifiers::SHIFT && self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
-            KeyCode::Down if key.modifiers == KeyModifiers::SHIFT && self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
-            KeyCode::Char('K') if self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollUp,
-            KeyCode::Char('J') if self.navigation.current_page == ActivePage::Moments && self.navigation.focused_panel == Focusable::MomentsContent => NavigationAction::ContentScrollDown,
+            KeyCode::Up
+                if key.modifiers == KeyModifiers::SHIFT
+                    && self.navigation.current_page == ActivePage::Moments
+                    && self.navigation.focused_panel == Focusable::MomentsContent =>
+            {
+                NavigationAction::ContentScrollUp
+            }
+            KeyCode::Down
+                if key.modifiers == KeyModifiers::SHIFT
+                    && self.navigation.current_page == ActivePage::Moments
+                    && self.navigation.focused_panel == Focusable::MomentsContent =>
+            {
+                NavigationAction::ContentScrollDown
+            }
+            KeyCode::Char('K')
+                if self.navigation.current_page == ActivePage::Moments
+                    && self.navigation.focused_panel == Focusable::MomentsContent =>
+            {
+                NavigationAction::ContentScrollUp
+            }
+            KeyCode::Char('J')
+                if self.navigation.current_page == ActivePage::Moments
+                    && self.navigation.focused_panel == Focusable::MomentsContent =>
+            {
+                NavigationAction::ContentScrollDown
+            }
 
             // List navigation (general)
-            KeyCode::Char('j') | KeyCode::Down if self.can_navigate_list() => NavigationAction::ListDown,
-            KeyCode::Char('k') | KeyCode::Up if self.can_navigate_list() => NavigationAction::ListUp,
+            KeyCode::Char('j') | KeyCode::Down if self.can_navigate_list() => {
+                NavigationAction::ListDown
+            }
+            KeyCode::Char('k') | KeyCode::Up if self.can_navigate_list() => {
+                NavigationAction::ListUp
+            }
             KeyCode::Enter => NavigationAction::Activate,
             KeyCode::Char('/') => {
                 self.set_focused_panel(Focusable::Search);
@@ -99,18 +150,27 @@ impl NavigationHandler for App {
                 // Handle play for both search results and dynamics
                 if self.navigation.current_page == ActivePage::Moments
                     && self.navigation.focused_panel == Focusable::MomentsContent
-                    && self.navigation.input_mode == InputMode::ListNav {
-                        // Play video from selected dynamic
-                        self.play_dynamic_video().await;
-                    } else {
-                        // Play video from search results or detail page
-                        self.play_video();
-                    }
+                    && self.navigation.input_mode == InputMode::ListNav
+                {
+                    // Play video from selected dynamic
+                    self.play_dynamic_video().await;
+                } else {
+                    // Play video from search results or detail page
+                    self.play_video();
+                }
                 return Ok(false);
             }
             // Horizontal navigation for moments panels
-            KeyCode::Char('h') | KeyCode::Left if self.navigation.current_page == ActivePage::Moments => NavigationAction::PanelLeft,
-            KeyCode::Char('l') | KeyCode::Right if self.navigation.current_page == ActivePage::Moments => NavigationAction::PanelRight,
+            KeyCode::Char('h') | KeyCode::Left
+                if self.navigation.current_page == ActivePage::Moments =>
+            {
+                NavigationAction::PanelLeft
+            }
+            KeyCode::Char('l') | KeyCode::Right
+                if self.navigation.current_page == ActivePage::Moments =>
+            {
+                NavigationAction::PanelRight
+            }
             _ => return Ok(false),
         };
 
@@ -191,8 +251,16 @@ impl App {
     /// Calculate next index for circular navigation
     fn calculate_next_index(current: usize, max_len: usize, is_down: bool) -> usize {
         if is_down {
-            if current >= max_len.saturating_sub(1) { 0 } else { current + 1 }
-        } else if current == 0 { max_len.saturating_sub(1) } else { current - 1 }
+            if current >= max_len.saturating_sub(1) {
+                0
+            } else {
+                current + 1
+            }
+        } else if current == 0 {
+            max_len.saturating_sub(1)
+        } else {
+            current - 1
+        }
     }
 
     /// Load dynamics for a specific author
@@ -202,11 +270,17 @@ impl App {
             self.selected_author_dynamics = Some(cached_dynamics.clone());
             self.dynamics_scroll_offset = 0;
             self.selected_dynamic_index = 0;
-            self.add_message(format!("Loaded {} dynamics from cache", cached_dynamics.len()), MessageLevel::Info);
+            self.add_message(
+                format!("Loaded {} dynamics from cache", cached_dynamics.len()),
+                MessageLevel::Info,
+            );
             return;
         }
 
-        self.add_message(format!("Loading dynamics for UID: {}", uid), MessageLevel::Info);
+        self.add_message(
+            format!("Loading dynamics for UID: {}", uid),
+            MessageLevel::Info,
+        );
         self.loading_dynamics = true;
         self.selected_author_dynamics = None;
         self.dynamics_scroll_offset = 0;
@@ -303,10 +377,11 @@ impl App {
         } else {
             // In ListNav mode, Enter opens video details
             if let Some(selected_index) = self.results_list_state.selected()
-                && let Some(video) = self.search_results.get(selected_index) {
-                    self.video_info = Some(self.create_video_info(video));
-                    self.set_active_page(ActivePage::Detail);
-                    self.set_input_mode(InputMode::Normal);
+                && let Some(video) = self.search_results.get(selected_index)
+            {
+                self.video_info = Some(self.create_video_info(video));
+                self.set_active_page(ActivePage::Detail);
+                self.set_input_mode(InputMode::Normal);
             }
         }
         NavigationResult::Handled
@@ -346,26 +421,26 @@ impl App {
         match self.navigation.current_page {
             ActivePage::Search => {
                 let current = self.results_list_state.selected().unwrap_or(0);
-                let new_index = Self::calculate_next_index(current, self.search_results.len(), is_down);
+                let new_index =
+                    Self::calculate_next_index(current, self.search_results.len(), is_down);
                 self.results_list_state.select(Some(new_index));
                 NavigationResult::Handled
             }
-            ActivePage::Moments => {
-                match self.navigation.focused_panel {
-                    Focusable::MomentsAuthors => self.handle_moments_authors_navigation(is_down),
-                    Focusable::MomentsContent => self.handle_moments_content_navigation(is_down),
-                    _ => NavigationResult::Continue,
-                }
-            }
+            ActivePage::Moments => match self.navigation.focused_panel {
+                Focusable::MomentsAuthors => self.handle_moments_authors_navigation(is_down),
+                Focusable::MomentsContent => self.handle_moments_content_navigation(is_down),
+                _ => NavigationResult::Continue,
+            },
             _ => NavigationResult::Continue,
         }
     }
 
     fn handle_content_scrolling(&mut self, is_down: bool) -> NavigationResult {
         if self.navigation.current_page != ActivePage::Moments
-            || self.navigation.focused_panel != Focusable::MomentsContent {
-                return NavigationResult::Continue;
-            }
+            || self.navigation.focused_panel != Focusable::MomentsContent
+        {
+            return NavigationResult::Continue;
+        }
 
         if let Some(dynamics) = &self.selected_author_dynamics {
             if is_down {
@@ -433,7 +508,10 @@ impl App {
     }
 
     // Overlay mode handlers (simplified versions)
-    async fn handle_command_mode(&mut self, key: crossterm::event::KeyEvent) -> std::io::Result<bool> {
+    async fn handle_command_mode(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> std::io::Result<bool> {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Enter => {
@@ -457,8 +535,8 @@ impl App {
                 self.overlays.command = false;
             }
             _ => {
-                use tui_input::backend::crossterm::EventHandler;
                 use ratatui::crossterm::event::Event;
+                use tui_input::backend::crossterm::EventHandler;
 
                 let ratatui_key = convert_key_event_for_input(key);
                 self.command_input.handle_event(&Event::Key(ratatui_key));
@@ -503,7 +581,10 @@ impl App {
         Ok(false)
     }
 
-    async fn handle_messages_mode(&mut self, key: crossterm::event::KeyEvent) -> std::io::Result<bool> {
+    async fn handle_messages_mode(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> std::io::Result<bool> {
         use crossterm::event::KeyCode;
 
         // Handle scrolling keys with universal function
@@ -539,7 +620,11 @@ impl App {
         Ok(false)
     }
 
-    async fn handle_editing_mode(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<()> {
+    async fn handle_editing_mode(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>,
+    ) -> std::io::Result<()> {
         use crossterm::event::KeyCode;
         match key.code {
             KeyCode::Enter => {
@@ -560,8 +645,8 @@ impl App {
                 self.set_focused_panel(Focusable::Search);
             }
             _ => {
-                use tui_input::backend::crossterm::EventHandler;
                 use ratatui::crossterm::event::Event;
+                use tui_input::backend::crossterm::EventHandler;
 
                 let ratatui_key = convert_key_event_for_input(key);
                 self.search_input.handle_event(&Event::Key(ratatui_key));
@@ -570,4 +655,3 @@ impl App {
         Ok(())
     }
 }
-

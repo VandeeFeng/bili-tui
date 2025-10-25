@@ -1,8 +1,8 @@
 use crate::app::App;
 use ratatui::prelude::*;
 
-pub mod traits;
 pub mod components;
+pub mod traits;
 
 pub use components::*;
 
@@ -10,9 +10,9 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),     // Search bar
-            Constraint::Min(0),        // Main content area
-            Constraint::Length(3),     // Message bar
+            Constraint::Length(3), // Search bar
+            Constraint::Min(0),    // Main content area
+            Constraint::Length(3), // Message bar
         ])
         .split(f.area());
 

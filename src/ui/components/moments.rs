@@ -11,31 +11,34 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Left panel: Authors list (data is already sorted in command layer)
     let authors: Vec<ListItem> = if let Some(data) = &app.moments_data {
-        data.iter().enumerate().map(|(index, author)| {
-            let author_name = &author.user_profile.info.uname;
-            let uid = author.user_profile.info.uid;
-            let is_favorite = app.following_config.is_favorite(uid);
+        data.iter()
+            .enumerate()
+            .map(|(index, author)| {
+                let author_name = &author.user_profile.info.uname;
+                let uid = author.user_profile.info.uid;
+                let is_favorite = app.following_config.is_favorite(uid);
 
-            // Use the index directly since data is already sorted
-            let is_selected = app.selected_author.selected() == Some(index);
+                // Use the index directly since data is already sorted
+                let is_selected = app.selected_author.selected() == Some(index);
 
-            // Build the display name with star if favorite
-            let display_name = if is_favorite {
-                format!("⭐ {}", author_name)
-            } else {
-                author_name.clone()
-            };
-
-            ListItem::new(Line::from(vec![
-                if is_selected {
-                    Span::styled(display_name, Style::default().fg(Color::Green))
+                // Build the display name with star if favorite
+                let display_name = if is_favorite {
+                    format!("⭐ {}", author_name)
                 } else {
-                    Span::raw(display_name)
-                },
-                Span::from(" ").fg(Color::DarkGray),
-                Span::raw(format!("(UID: {})", uid)).fg(Color::DarkGray),
-            ]))
-        }).collect()
+                    author_name.clone()
+                };
+
+                ListItem::new(Line::from(vec![
+                    if is_selected {
+                        Span::styled(display_name, Style::default().fg(Color::Green))
+                    } else {
+                        Span::raw(display_name)
+                    },
+                    Span::from(" ").fg(Color::DarkGray),
+                    Span::raw(format!("(UID: {})", uid)).fg(Color::DarkGray),
+                ]))
+            })
+            .collect()
     } else {
         vec![ListItem::new("No data available")]
     };
@@ -57,7 +60,7 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
             ratatui::widgets::Block::default()
                 .title("Following Authors")
                 .borders(ratatui::widgets::Borders::ALL)
-                .border_style(Style::default().fg(block_color))
+                .border_style(Style::default().fg(block_color)),
         )
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
@@ -85,7 +88,10 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
             // Show dynamics starting from scroll offset, calculate viewport height
             let viewport_height = moments_chunks[1].height.saturating_sub(2) as usize; // Subtract border lines
             app.dynamics_viewport_height = viewport_height; // Store for scrolling handler
-            let visible_dynamics = dynamics.iter().skip(app.dynamics_scroll_offset).take(viewport_height);
+            let visible_dynamics = dynamics
+                .iter()
+                .skip(app.dynamics_scroll_offset)
+                .take(viewport_height);
 
             for (display_index, dynamic) in visible_dynamics.enumerate() {
                 let actual_index = app.dynamics_scroll_offset + display_index;
@@ -99,7 +105,7 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     } else {
                         "   ".fg(Color::Reset)
                     },
-                    Span::raw(format!("Dynamic #{}", actual_index + 1)).fg(Color::Cyan)
+                    Span::raw(format!("Dynamic #{}", actual_index + 1)).fg(Color::Cyan),
                 ];
 
                 // Add [P]lay option for video dynamics when in ListNav mode
@@ -184,17 +190,26 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
 
             // Show scroll position indicator if there are more dynamics
             if dynamics.len() > viewport_height {
-                let remaining = dynamics.len() - app.dynamics_scroll_offset - viewport_height.min(dynamics.len() - app.dynamics_scroll_offset);
+                let remaining = dynamics.len()
+                    - app.dynamics_scroll_offset
+                    - viewport_height.min(dynamics.len() - app.dynamics_scroll_offset);
                 if remaining > 0 {
-                    content.push(Line::from(format!("... {} more below, {} total", remaining, dynamics.len()).fg(Color::DarkGray)));
+                    content.push(Line::from(
+                        format!("... {} more below, {} total", remaining, dynamics.len())
+                            .fg(Color::DarkGray),
+                    ));
                 } else {
-                    content.push(Line::from(format!("End of {} dynamics", dynamics.len()).fg(Color::DarkGray)));
+                    content.push(Line::from(
+                        format!("End of {} dynamics", dynamics.len()).fg(Color::DarkGray),
+                    ));
                 }
             }
 
             content
         }
-    } else if let (Some(data), Some(selected_index)) = (&app.moments_data, app.selected_author.selected()) {
+    } else if let (Some(data), Some(selected_index)) =
+        (&app.moments_data, app.selected_author.selected())
+    {
         if let Some(author_item) = data.get(selected_index) {
             let author = &author_item.user_profile.info;
             vec![
@@ -203,7 +218,9 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 Line::from(vec!["Author: ".bold(), Span::raw(author.uname.clone())]),
                 Line::from(vec!["UID: ".bold(), Span::raw(author.uid.to_string())]),
                 Line::from(""),
-                Line::from("Press Enter or navigate to load this author's dynamics".fg(Color::DarkGray)),
+                Line::from(
+                    "Press Enter or navigate to load this author's dynamics".fg(Color::DarkGray),
+                ),
             ]
         } else {
             vec![Line::from("No author selected")]
@@ -221,7 +238,7 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
     } else if content_focused {
         Color::Green
     } else {
-        Color::Reset  // Use default color instead of White
+        Color::Reset // Use default color instead of White
     };
 
     let content_panel = Paragraph::new(selected_author_content)
@@ -230,7 +247,7 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
             ratatui::widgets::Block::default()
                 .title("Author Details & Dynamics")
                 .borders(ratatui::widgets::Borders::ALL)
-                .border_style(Style::default().fg(block_color))
+                .border_style(Style::default().fg(block_color)),
         );
     f.render_widget(content_panel, moments_chunks[1]);
 }

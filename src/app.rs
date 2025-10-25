@@ -6,8 +6,8 @@ use crate::ui;
 use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
 use std::{collections::HashMap, error::Error, io, time::Duration};
-use tui_input::Input;
 use tokio::sync::mpsc;
+use tui_input::Input;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum Focusable {
@@ -49,7 +49,11 @@ pub enum NavigationResult {
 /// Unified navigation handler for all keyboard and UI interactions
 pub trait NavigationHandler {
     /// Handle all keyboard events
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent, tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>) -> std::io::Result<bool>;
+    async fn handle_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        tx: &tokio::sync::mpsc::Sender<Result<Vec<crate::api::VideoResult>, String>>,
+    ) -> std::io::Result<bool>;
 
     /// Execute navigation action
     fn execute_navigation(&mut self, action: NavigationAction) -> NavigationResult;
@@ -60,7 +64,6 @@ pub trait NavigationHandler {
     /// Check if list navigation is allowed
     fn can_navigate_list(&self) -> bool;
 }
-
 
 impl Focusable {
     pub fn next(self) -> Self {
@@ -81,8 +84,6 @@ impl Focusable {
         }
     }
 }
-
-
 
 // Page state - manages currently displayed page
 #[derive(PartialEq, Clone, Copy)]
@@ -190,7 +191,6 @@ pub struct App {
 }
 
 impl App {
-
     pub fn new() -> Self {
         let (dynamics_tx, dynamics_rx) = tokio::sync::mpsc::channel(32);
         let following_config = FollowingConfig::load().unwrap_or_default();
@@ -221,10 +221,7 @@ impl App {
     }
 
     pub fn add_message(&mut self, text: String, level: MessageLevel) {
-        self.messages.push(Message {
-            text,
-            level,
-        });
+        self.messages.push(Message { text, level });
 
         // Keep only last 50 messages
         if self.messages.len() > 50 {
@@ -300,11 +297,17 @@ impl App {
                 if let Some(video_info) = &dynamic.video_info {
                     Some(video_info.title.clone())
                 } else {
-                    self.add_message("Selected dynamic is not a video".to_string(), MessageLevel::Warning);
+                    self.add_message(
+                        "Selected dynamic is not a video".to_string(),
+                        MessageLevel::Warning,
+                    );
                     return;
                 }
             } else {
-                self.add_message("Invalid dynamic selection".to_string(), MessageLevel::Warning);
+                self.add_message(
+                    "Invalid dynamic selection".to_string(),
+                    MessageLevel::Warning,
+                );
                 return;
             }
         } else {
@@ -313,7 +316,10 @@ impl App {
         };
 
         if let Some(title) = video_title {
-            self.add_message(format!("Searching for video: {}", title), MessageLevel::Info);
+            self.add_message(
+                format!("Searching for video: {}", title),
+                MessageLevel::Info,
+            );
 
             match crate::api::search_video_by_title(&title).await {
                 Ok(Some(bvid)) => {
@@ -327,12 +333,18 @@ impl App {
                             self.add_message(format!("Playing: {}", title), MessageLevel::Success);
                         }
                         Err(e) => {
-                            self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
+                            self.add_message(
+                                format!("Failed to start mpv: {}", e),
+                                MessageLevel::Warning,
+                            );
                         }
                     }
                 }
                 Ok(None) => {
-                    self.add_message("Video not found in search results".to_string(), MessageLevel::Warning);
+                    self.add_message(
+                        "Video not found in search results".to_string(),
+                        MessageLevel::Warning,
+                    );
                 }
                 Err(e) => {
                     self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
@@ -368,37 +380,40 @@ impl App {
 
             // Check for dynamics loading responses
             if let Some(ref mut dynamics_rx) = self.dynamics_rx
-                && let Ok((uid, dynamics)) = dynamics_rx.try_recv() {
-                    let count = dynamics.len();
-                    self.author_dynamics_cache.insert(uid, dynamics.clone());
+                && let Ok((uid, dynamics)) = dynamics_rx.try_recv()
+            {
+                let count = dynamics.len();
+                self.author_dynamics_cache.insert(uid, dynamics.clone());
 
-                    // Update UI if this is the currently selected author
-                    if let Some(selected_index) = self.selected_author.selected()
-                        && let Some(ref data) = self.moments_data
-                            && let Some(author) = data.get(selected_index)
-                                && author.user_profile.info.uid == uid {
-                                    self.selected_author_dynamics = Some(dynamics);
-                                    self.loading_dynamics = false;
-                                    self.dynamics_scroll_offset = 0;
-                                    self.selected_dynamic_index = 0; // Reset dynamic selection
-                                    self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
-                                }
+                // Update UI if this is the currently selected author
+                if let Some(selected_index) = self.selected_author.selected()
+                    && let Some(ref data) = self.moments_data
+                    && let Some(author) = data.get(selected_index)
+                    && author.user_profile.info.uid == uid
+                {
+                    self.selected_author_dynamics = Some(dynamics);
+                    self.loading_dynamics = false;
+                    self.dynamics_scroll_offset = 0;
+                    self.selected_dynamic_index = 0; // Reset dynamic selection
+                    self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
                 }
+            }
 
             if event::poll(Duration::from_millis(50))?
-                && let Event::Key(key) = event::read()? {
-                    match handle_key_event(&mut self, key, &tx).await {
-                        Ok(should_quit) => {
-                            if should_quit {
-                                break Ok(());
-                            }
-                        }
-                        Err(e) if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" => {
+                && let Event::Key(key) = event::read()?
+            {
+                match handle_key_event(&mut self, key, &tx).await {
+                    Ok(should_quit) => {
+                        if should_quit {
                             break Ok(());
                         }
-                        Err(e) => break Err(e.into()),
                     }
+                    Err(e) if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" => {
+                        break Ok(());
+                    }
+                    Err(e) => break Err(e.into()),
                 }
+            }
         };
 
         terminal::restore_terminal(&mut terminal)?;

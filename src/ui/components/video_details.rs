@@ -8,8 +8,14 @@ pub fn render_video_details_panel(f: &mut Frame, area: Rect, app: &App) {
         vec![
             Line::from(vec!["Title: ".bold(), Span::raw(info.title.clone())]),
             Line::from(vec!["Author: ".bold(), Span::raw(info.owner.name.clone())]),
-            Line::from(vec!["Plays: ".bold(), Span::raw(info.stat.view.to_string())]),
-            Line::from(vec!["Likes: ".bold(), Span::raw(info.stat.like.to_string())]),
+            Line::from(vec![
+                "Plays: ".bold(),
+                Span::raw(info.stat.view.to_string()),
+            ]),
+            Line::from(vec![
+                "Likes: ".bold(),
+                Span::raw(info.stat.like.to_string()),
+            ]),
             Line::from(""),
             Line::from(Span::raw(info.desc.clone())),
             Line::from(""),
@@ -18,22 +24,13 @@ pub fn render_video_details_panel(f: &mut Frame, area: Rect, app: &App) {
     } else if let Some(selected) = app.results_list_state.selected() {
         if let Some(video) = app.search_results.get(selected) {
             let text = vec![
-                Line::from(vec![
-                    "Title: ".bold(),
-                    Span::raw(video.title.clone()),
-                ]),
+                Line::from(vec!["Title: ".bold(), Span::raw(video.title.clone())]),
                 Line::from(vec![
                     "Plays: ".bold(),
                     Span::raw(video.play.to_string().trim_matches('"').to_string()),
                 ]),
-                Line::from(vec![
-                    "Likes: ".bold(),
-                    Span::raw(video.like.to_string()),
-                ]),
-                Line::from(vec![
-                    "Duration: ".bold(),
-                    Span::raw(video.duration.clone()),
-                ]),
+                Line::from(vec!["Likes: ".bold(), Span::raw(video.like.to_string())]),
+                Line::from(vec!["Duration: ".bold(), Span::raw(video.duration.clone())]),
                 Line::from(""),
                 Line::from(Span::raw(video.description.clone())),
                 Line::from(""),

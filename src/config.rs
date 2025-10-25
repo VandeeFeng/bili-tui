@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize, Serializer};
+use crate::api::AuthorItem;
 use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use std::fs;
 use std::path::PathBuf;
-use crate::api::AuthorItem;
 
 impl From<&AuthorInfo> for AuthorItem {
     fn from(info: &AuthorInfo) -> Self {
@@ -23,8 +23,7 @@ pub struct AuthorInfo {
     pub username: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct FollowingConfig {
     pub enable_custom_following: bool,
     #[serde(default)]
@@ -51,7 +50,6 @@ impl Serialize for FollowingConfig {
     }
 }
 
-
 impl FollowingConfig {
     pub fn load() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let config_path = get_config_path()?;
@@ -72,9 +70,7 @@ impl FollowingConfig {
         }
 
         let config: FollowingConfig = serde_json::from_str(&content)
-            .map_err(|e| {
-                format!("Invalid JSON in config file: {}. Creating new config.", e)
-            })?;
+            .map_err(|e| format!("Invalid JSON in config file: {}. Creating new config.", e))?;
 
         // For backwards compatibility: if the loaded config doesn't have the expected structure
         // (e.g., missing favorites field), resave it to ensure all fields are present
@@ -99,7 +95,11 @@ impl FollowingConfig {
     }
 
     pub fn add_custom_author(&mut self, uid: u64, username: String) {
-        if let Some(pos) = self.custom_authors.iter().position(|author| author.uid == uid) {
+        if let Some(pos) = self
+            .custom_authors
+            .iter()
+            .position(|author| author.uid == uid)
+        {
             self.custom_authors[pos].username = username;
         } else {
             self.custom_authors.push(AuthorInfo { uid, username });
@@ -187,10 +187,13 @@ impl FollowingConfig {
     }
 
     pub fn update_from_api_data(&mut self, authors: &[AuthorItem]) {
-        self.custom_authors = authors.iter().map(|author| AuthorInfo {
-            uid: author.user_profile.info.uid,
-            username: author.user_profile.info.uname.clone(),
-        }).collect();
+        self.custom_authors = authors
+            .iter()
+            .map(|author| AuthorInfo {
+                uid: author.user_profile.info.uid,
+                username: author.user_profile.info.uname.clone(),
+            })
+            .collect();
 
         self.last_updated = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -208,7 +211,8 @@ impl FollowingConfig {
 
     pub fn merge_authors(&self, mut following_authors: Vec<AuthorItem>) -> Vec<AuthorItem> {
         let favorite_authors = self.to_favorite_author_items();
-        let favorite_uids: std::collections::HashSet<u64> = favorite_authors.iter()
+        let favorite_uids: std::collections::HashSet<u64> = favorite_authors
+            .iter()
             .map(|author| author.user_profile.info.uid)
             .collect();
 
@@ -216,7 +220,10 @@ impl FollowingConfig {
         following_authors.retain(|author| !favorite_uids.contains(&author.user_profile.info.uid));
 
         // Combine: favorites first, then following authors
-        favorite_authors.into_iter().chain(following_authors).collect()
+        favorite_authors
+            .into_iter()
+            .chain(following_authors)
+            .collect()
     }
 }
 
