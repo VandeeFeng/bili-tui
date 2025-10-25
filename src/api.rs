@@ -339,7 +339,7 @@ pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn s
         return Err(format!("API returned error code {}: {}", api_response.code, api_response.message).into());
     }
 
-    let dynamics: Vec<AuthorDynamic> = api_response.data.items.into_iter().map(|item| {
+    let mut dynamics: Vec<AuthorDynamic> = api_response.data.items.into_iter().map(|item| {
         let author = &item.modules.module_author;
         let dynamic_content = &item.modules.module_dynamic;
 
@@ -358,6 +358,9 @@ pub async fn get_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, Box<dyn s
             video_info,
         }
     }).collect();
+
+    // Sort dynamics by timestamp in descending order (newest first)
+    dynamics.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     Ok(dynamics)
 }
