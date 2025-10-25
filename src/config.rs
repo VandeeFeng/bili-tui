@@ -4,6 +4,19 @@ use std::fs;
 use std::path::PathBuf;
 use crate::api::AuthorItem;
 
+impl From<&AuthorInfo> for AuthorItem {
+    fn from(info: &AuthorInfo) -> Self {
+        AuthorItem {
+            user_profile: crate::api::UserProfileMinimal {
+                info: crate::api::UserInfo {
+                    uid: info.uid,
+                    uname: info.username.clone(),
+                },
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorInfo {
     pub uid: u64,
@@ -186,14 +199,24 @@ impl FollowingConfig {
     }
 
     pub fn to_author_items(&self) -> Vec<AuthorItem> {
-        self.custom_authors.iter().map(|author| AuthorItem {
-            user_profile: crate::api::UserProfileMinimal {
-                info: crate::api::UserInfo {
-                    uid: author.uid,
-                    uname: author.username.clone(),
-                },
-            },
-        }).collect()
+        self.custom_authors.iter().map(AuthorItem::from).collect()
+    }
+
+    pub fn to_favorite_author_items(&self) -> Vec<AuthorItem> {
+        self.favorites.iter().map(AuthorItem::from).collect()
+    }
+
+    pub fn merge_authors(&self, mut following_authors: Vec<AuthorItem>) -> Vec<AuthorItem> {
+        let favorite_authors = self.to_favorite_author_items();
+        let favorite_uids: std::collections::HashSet<u64> = favorite_authors.iter()
+            .map(|author| author.user_profile.info.uid)
+            .collect();
+
+        // Remove favorites from following list to avoid duplicates
+        following_authors.retain(|author| !favorite_uids.contains(&author.user_profile.info.uid));
+
+        // Combine: favorites first, then following authors
+        favorite_authors.into_iter().chain(following_authors).collect()
     }
 }
 

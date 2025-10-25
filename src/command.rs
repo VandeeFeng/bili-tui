@@ -194,13 +194,9 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
             app.add_message("Loading moments...".to_string(), crate::app::MessageLevel::Info);
 
             match api::get_moments().await {
-                Ok(mut authors) => {
-                    // Sort authors: favorites first, then others
-                    authors.sort_by(|a, b| {
-                        let a_is_favorite = app.following_config.is_favorite(a.user_profile.info.uid);
-                        let b_is_favorite = app.following_config.is_favorite(b.user_profile.info.uid);
-                        b_is_favorite.cmp(&a_is_favorite)
-                    });
+                Ok(following_authors) => {
+                    // Merge following authors with standalone favorites
+                    let authors = app.following_config.merge_authors(following_authors);
 
                     let count = authors.len();
                     app.moments_data = Some(authors);
@@ -231,40 +227,27 @@ pub async fn execute(command: Command, app: &mut App) -> Result<(), String> {
         Command::ShowFavorites => {
             app.add_message("Loading favorite authors...".to_string(), crate::app::MessageLevel::Info);
 
-            match api::get_moments().await {
-                Ok(all_authors) => {
-                    // Filter to only favorites in command layer
-                    let favorite_authors: Vec<_> = all_authors.into_iter()
-                        .filter(|author| {
-                            let uid = author.user_profile.info.uid;
-                            app.following_config.is_favorite(uid)
-                        })
-                        .collect();
+            // Use favorites directly, no need to fetch from API
+            let favorite_authors = app.following_config.to_favorite_author_items();
+            let count = favorite_authors.len();
 
-                    let count = favorite_authors.len();
-                    if count == 0 {
-                        app.add_message("No favorite authors found. Use 'favorite-add <uid> <username>' to add favorites.".to_string(), crate::app::MessageLevel::Warning);
-                        return Ok(());
-                    }
-                    app.moments_data = Some(favorite_authors);
-                    app.set_active_page(crate::app::ActivePage::Moments);
-                    app.set_input_mode(crate::app::InputMode::Normal);
-                    app.set_focused_panel(crate::app::Focusable::MomentsAuthors);
-
-                    if !app.moments_data.as_ref().unwrap().is_empty() {
-                        app.selected_author.select(Some(0));
-                        // Load dynamics for the first author
-                        fetch_first_author_dynamics(app).await;
-                    }
-                    app.add_message(format!("Loaded {} favorite authors", count), crate::app::MessageLevel::Success);
-                    Ok(())
-                }
-                Err(e) => {
-                    let error_msg = format!("Failed to load favorite authors: {}", e);
-                    app.add_message(error_msg.clone(), crate::app::MessageLevel::Error);
-                    Err(error_msg)
-                }
+            if count == 0 {
+                app.add_message("No favorite authors found. Use 'favorite-add <uid> <username>' to add favorites.".to_string(), crate::app::MessageLevel::Warning);
+                return Ok(());
             }
+
+            app.moments_data = Some(favorite_authors);
+            app.set_active_page(crate::app::ActivePage::Moments);
+            app.set_input_mode(crate::app::InputMode::Normal);
+            app.set_focused_panel(crate::app::Focusable::MomentsAuthors);
+
+            if !app.moments_data.as_ref().unwrap().is_empty() {
+                app.selected_author.select(Some(0));
+                // Load dynamics for the first author
+                fetch_first_author_dynamics(app).await;
+            }
+            app.add_message(format!("Loaded {} favorite authors", count), crate::app::MessageLevel::Success);
+            Ok(())
         }
         Command::AddAuthor(uid, username) => {
             app.following_config.add_custom_author(uid, username.clone());
