@@ -62,7 +62,6 @@ impl FollowingConfig {
 
         let content = fs::read_to_string(&config_path)?;
 
-        // Handle empty or invalid JSON file
         if content.trim().is_empty() {
             let config = FollowingConfig::default();
             config.save()?;
@@ -72,9 +71,6 @@ impl FollowingConfig {
         let config: FollowingConfig = serde_json::from_str(&content)
             .map_err(|e| format!("Invalid JSON in config file: {}. Creating new config.", e))?;
 
-        // For backwards compatibility: if the loaded config doesn't have the expected structure
-        // (e.g., missing favorites field), resave it to ensure all fields are present
-        // This will automatically add missing fields with default values due to #[serde(default)]
         if !content.contains("\"favorites\"") {
             config.save()?;
         }
@@ -94,6 +90,13 @@ impl FollowingConfig {
         Ok(())
     }
 
+    fn update_timestamp(&mut self) {
+        self.last_updated = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+    }
+
     pub fn add_custom_author(&mut self, uid: u64, username: String) {
         if let Some(pos) = self
             .custom_authors
@@ -105,10 +108,7 @@ impl FollowingConfig {
             self.custom_authors.push(AuthorInfo { uid, username });
         }
         self.enable_custom_following = true;
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        self.update_timestamp();
     }
 
     pub fn remove_custom_author(&mut self, uid: u64) -> bool {
@@ -120,11 +120,7 @@ impl FollowingConfig {
             self.enable_custom_following = false;
         }
 
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        self.update_timestamp();
         was_removed
     }
 
@@ -134,10 +130,7 @@ impl FollowingConfig {
         } else {
             self.blacklist.push(AuthorInfo { uid, username });
         }
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        self.update_timestamp();
     }
 
     pub fn remove_from_blacklist(&mut self, uid: u64) -> bool {
@@ -145,11 +138,7 @@ impl FollowingConfig {
         self.blacklist.retain(|author| author.uid != uid);
         let was_removed = self.blacklist.len() != original_len;
 
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        self.update_timestamp();
         was_removed
     }
 
@@ -163,10 +152,7 @@ impl FollowingConfig {
         } else {
             self.favorites.push(AuthorInfo { uid, username });
         }
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        self.update_timestamp();
     }
 
     pub fn remove_favorite(&mut self, uid: u64) -> bool {
@@ -174,11 +160,7 @@ impl FollowingConfig {
         self.favorites.retain(|author| author.uid != uid);
         let was_removed = self.favorites.len() != original_len;
 
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
+        self.update_timestamp();
         was_removed
     }
 
@@ -195,10 +177,7 @@ impl FollowingConfig {
             })
             .collect();
 
-        self.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        self.update_timestamp();
     }
 
     pub fn to_author_items(&self) -> Vec<AuthorItem> {
@@ -216,10 +195,8 @@ impl FollowingConfig {
             .map(|author| author.user_profile.info.uid)
             .collect();
 
-        // Remove favorites from following list to avoid duplicates
         following_authors.retain(|author| !favorite_uids.contains(&author.user_profile.info.uid));
 
-        // Combine: favorites first, then following authors
         favorite_authors
             .into_iter()
             .chain(following_authors)

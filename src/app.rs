@@ -147,7 +147,7 @@ pub struct Message {
     pub level: MessageLevel,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MessageLevel {
     Info,
     Success,
@@ -266,89 +266,79 @@ impl App {
     }
 
     pub fn play_video(&mut self) {
-        let bvid = if let Some(info) = &self.video_info {
-            Some(info.bvid.clone())
-        } else if let Some(selected) = self.results_list_state.selected() {
-            self.search_results.get(selected).map(|v| v.bvid.clone())
-        } else {
-            None
-        };
+        let bvid = self
+            .video_info
+            .as_ref()
+            .map(|info| info.bvid.clone())
+            .or_else(|| {
+                self.results_list_state
+                    .selected()
+                    .and_then(|idx| self.search_results.get(idx).map(|v| v.bvid.clone()))
+            });
 
-        if let Some(bvid) = bvid {
-            let url = format!("https://www.bilibili.com/video/{}", bvid);
-            match std::process::Command::new("mpv")
-                .arg("--no-terminal") // showoff mpv terminal output
-                .arg(url)
-                .spawn()
-            {
-                Ok(_) => {
-                    self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
-                }
-                Err(e) => {
-                    self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
-                }
+        match bvid {
+            Some(bvid) => {
+                let url = format!("https://www.bilibili.com/video/{}", bvid);
+                self.launch_mpv(&url);
+            }
+            None => {
+                self.add_message("No video selected".to_string(), MessageLevel::Warning);
             }
         }
     }
 
     pub async fn play_dynamic_video(&mut self) {
-        let video_title = if let Some(dynamics) = &self.selected_author_dynamics {
-            if let Some(dynamic) = dynamics.get(self.selected_dynamic_index) {
-                if let Some(video_info) = &dynamic.video_info {
-                    Some(video_info.title.clone())
-                } else {
-                    self.add_message(
-                        "Selected dynamic is not a video".to_string(),
-                        MessageLevel::Warning,
-                    );
-                    return;
-                }
-            } else {
+        let video_title = self
+            .selected_author_dynamics
+            .as_ref()
+            .and_then(|dynamics| dynamics.get(self.selected_dynamic_index))
+            .and_then(|dynamic| dynamic.video_info.as_ref())
+            .map(|video| video.title.clone());
+
+        match video_title {
+            Some(title) => {
                 self.add_message(
-                    "Invalid dynamic selection".to_string(),
-                    MessageLevel::Warning,
+                    format!("Searching for video: {}", title),
+                    MessageLevel::Info,
                 );
-                return;
-            }
-        } else {
-            self.add_message("No dynamics available".to_string(), MessageLevel::Warning);
-            return;
-        };
 
-        if let Some(title) = video_title {
-            self.add_message(
-                format!("Searching for video: {}", title),
-                MessageLevel::Info,
-            );
-
-            match crate::api::search_video_by_title(&title).await {
-                Ok(Some(bvid)) => {
-                    let url = format!("https://www.bilibili.com/video/{}", bvid);
-                    match std::process::Command::new("mpv")
-                        .arg("--no-terminal")
-                        .arg(url)
-                        .spawn()
-                    {
-                        Ok(_) => {
-                            self.add_message(format!("Playing: {}", title), MessageLevel::Success);
-                        }
-                        Err(e) => {
-                            self.add_message(
-                                format!("Failed to start mpv: {}", e),
-                                MessageLevel::Warning,
-                            );
-                        }
+                match crate::api::search_video_by_title(&title).await {
+                    Ok(Some(bvid)) => {
+                        let url = format!("https://www.bilibili.com/video/{}", bvid);
+                        self.launch_mpv(&url);
+                        self.add_message(format!("Playing: {}", title), MessageLevel::Success);
+                    }
+                    Ok(None) => {
+                        self.add_message(
+                            "Video not found in search results".to_string(),
+                            MessageLevel::Warning,
+                        );
+                    }
+                    Err(e) => {
+                        self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
                     }
                 }
-                Ok(None) => {
-                    self.add_message(
-                        "Video not found in search results".to_string(),
-                        MessageLevel::Warning,
-                    );
-                }
-                Err(e) => {
-                    self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
-                }
+            }
+            None => {
+                self.add_message(
+                    "Selected dynamic is not a video".to_string(),
+                    MessageLevel::Warning,
+                );
+            }
+        }
+    }
+
+    fn launch_mpv(&mut self, url: &str) {
+        match std::process::Command::new("mpv")
+            .arg("--no-terminal")
+            .arg(url)
+            .spawn()
+        {
+            Ok(_) => {
+                self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
+            }
+            Err(e) => {
+                self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
             }
         }
     }
@@ -360,54 +350,15 @@ impl App {
         let result = loop {
             terminal.draw(|f| ui::ui(f, &mut self))?;
 
-            if let Ok(response) = rx.try_recv() {
-                match response {
-                    Ok(results) => {
-                        self.search_results = results;
-                        if !self.search_results.is_empty() {
-                            self.results_list_state.select(Some(0));
-                        }
-                        self.set_input_mode(InputMode::ListNav);
-                        self.set_focused_panel(Focusable::Results);
-                        self.set_active_page(ActivePage::Search); // Ensure we're on search page
-                        self.add_message("Search completed".to_string(), MessageLevel::Success);
-                    }
-                    Err(e) => {
-                        self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
-                    }
-                }
-            }
-
-            // Check for dynamics loading responses
-            if let Some(ref mut dynamics_rx) = self.dynamics_rx
-                && let Ok((uid, dynamics)) = dynamics_rx.try_recv()
-            {
-                let count = dynamics.len();
-                self.author_dynamics_cache.insert(uid, dynamics.clone());
-
-                // Update UI if this is the currently selected author
-                if let Some(selected_index) = self.selected_author.selected()
-                    && let Some(ref data) = self.moments_data
-                    && let Some(author) = data.get(selected_index)
-                    && author.user_profile.info.uid == uid
-                {
-                    self.selected_author_dynamics = Some(dynamics);
-                    self.loading_dynamics = false;
-                    self.dynamics_scroll_offset = 0;
-                    self.selected_dynamic_index = 0; // Reset dynamic selection
-                    self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
-                }
-            }
+            self.handle_search_response(&mut rx);
+            self.handle_dynamics_response();
 
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()?
             {
                 match handle_key_event(&mut self, key, &tx).await {
-                    Ok(should_quit) => {
-                        if should_quit {
-                            break Ok(());
-                        }
-                    }
+                    Ok(true) => break Ok(()),
+                    Ok(false) => continue,
                     Err(e) if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" => {
                         break Ok(());
                     }
@@ -418,5 +369,49 @@ impl App {
 
         terminal::restore_terminal(&mut terminal)?;
         result
+    }
+
+    fn handle_search_response(
+        &mut self,
+        rx: &mut mpsc::Receiver<Result<Vec<crate::api::VideoResult>, String>>,
+    ) {
+        if let Ok(response) = rx.try_recv() {
+            match response {
+                Ok(results) => {
+                    self.search_results = results;
+                    if !self.search_results.is_empty() {
+                        self.results_list_state.select(Some(0));
+                    }
+                    self.set_input_mode(InputMode::ListNav);
+                    self.set_focused_panel(Focusable::Results);
+                    self.set_active_page(ActivePage::Search);
+                    self.add_message("Search completed".to_string(), MessageLevel::Success);
+                }
+                Err(e) => {
+                    self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
+                }
+            }
+        }
+    }
+
+    fn handle_dynamics_response(&mut self) {
+        if let Some(ref mut dynamics_rx) = self.dynamics_rx
+            && let Ok((uid, dynamics)) = dynamics_rx.try_recv()
+        {
+            let count = dynamics.len();
+            self.author_dynamics_cache.insert(uid, dynamics.clone());
+
+            if let Some(selected_index) = self.selected_author.selected()
+                && let Some(ref data) = self.moments_data
+                && let Some(author) = data.get(selected_index)
+                && author.user_profile.info.uid == uid
+            {
+                self.selected_author_dynamics = Some(dynamics);
+                self.loading_dynamics = false;
+                self.dynamics_scroll_offset = 0;
+                self.selected_dynamic_index = 0;
+                self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
+            }
+        }
     }
 }

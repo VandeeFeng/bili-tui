@@ -1,5 +1,9 @@
 use serde::Deserialize;
+use std::sync::OnceLock;
 
+static CLIENT: OnceLock<BilibiliClient> = OnceLock::new();
+
+#[derive(Debug)]
 struct BilibiliClient {
     client: reqwest::Client,
     sessdata: String,
@@ -13,6 +17,15 @@ impl BilibiliClient {
             .build()?;
 
         Ok(Self { client, sessdata })
+    }
+
+    fn get() -> Result<&'static Self, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(client) = CLIENT.get() {
+            return Ok(client);
+        }
+        let client = BilibiliClient::new()?;
+        CLIENT.set(client).expect("Failed to initialize client");
+        Ok(CLIENT.get().expect("Client not initialized"))
     }
 
     async fn get_and_parse<T: serde::de::DeserializeOwned>(
@@ -133,7 +146,7 @@ pub async fn search(
         "https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword={}",
         keyword
     );
-    let client = BilibiliClient::new()?;
+    let client = BilibiliClient::get()?;
     let response: SearchResponse = client.get_and_parse(&url).await?;
 
     let mut videos = vec![];
@@ -153,7 +166,7 @@ pub async fn get_video_info(
         "https://api.bilibili.com/x/web-interface/view?bvid={}",
         bvid
     );
-    let client = BilibiliClient::new()?;
+    let client = BilibiliClient::get()?;
     let response: VideoInfoResponse = client.get_and_parse(&url).await?;
     Ok(response.data)
 }
@@ -202,7 +215,7 @@ pub async fn get_moments() -> Result<Vec<AuthorItem>, Box<dyn std::error::Error 
     if authors.is_empty() {
         let url =
             "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?teenagers_mode=0";
-        let client = BilibiliClient::new()?;
+        let client = BilibiliClient::get()?;
         let api_response: MomentsResponse = client.get_and_check(url).await?;
 
         if api_response.code != 0 {
@@ -355,7 +368,7 @@ pub async fn get_user_dynamics(
         "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid={}",
         uid
     );
-    let client = BilibiliClient::new()?;
+    let client = BilibiliClient::get()?;
     let api_response: SpaceDynamicResponse = client.get_and_check(&url).await?;
 
     if api_response.code != 0 {
@@ -395,7 +408,6 @@ pub async fn get_user_dynamics(
         })
         .collect();
 
-    // Sort dynamics by timestamp in descending order (newest first)
     dynamics.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     Ok(dynamics)

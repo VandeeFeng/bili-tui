@@ -5,28 +5,30 @@ use crate::app::{
 use ratatui::crossterm::event::KeyEvent as RatatuiKeyEvent;
 use std::io;
 
-// Convert crossterm event to ratatui's crossterm event for input handling
 fn convert_key_event_for_input(key: crossterm::event::KeyEvent) -> RatatuiKeyEvent {
-    use std::mem::transmute;
-
     RatatuiKeyEvent {
         code: unsafe {
-            transmute::<crossterm::event::KeyCode, ratatui::crossterm::event::KeyCode>(key.code)
+            std::mem::transmute::<crossterm::event::KeyCode, ratatui::crossterm::event::KeyCode>(
+                key.code,
+            )
         },
         modifiers: unsafe {
-            transmute::<crossterm::event::KeyModifiers, ratatui::crossterm::event::KeyModifiers>(
-                key.modifiers,
-            )
+            std::mem::transmute::<
+                crossterm::event::KeyModifiers,
+                ratatui::crossterm::event::KeyModifiers,
+            >(key.modifiers)
         },
         kind: unsafe {
-            transmute::<crossterm::event::KeyEventKind, ratatui::crossterm::event::KeyEventKind>(
-                key.kind,
-            )
+            std::mem::transmute::<
+                crossterm::event::KeyEventKind,
+                ratatui::crossterm::event::KeyEventKind,
+            >(key.kind)
         },
         state: unsafe {
-            transmute::<crossterm::event::KeyEventState, ratatui::crossterm::event::KeyEventState>(
-                key.state,
-            )
+            std::mem::transmute::<
+                crossterm::event::KeyEventState,
+                ratatui::crossterm::event::KeyEventState,
+            >(key.state)
         },
     }
 }
