@@ -50,8 +50,8 @@ For the latest:
     ```bash
     cargo run
     ```
-### SESSDATA
-To get better search results and video quality, you can provide your Bilibili SESSDATA via the `SESSDATA` environment variable.
+### BILI_SESSDATA
+To get better search results and video quality, you can provide your Bilibili SESSDATA via the `BILI_SESSDATA` environment variable.
 
 **How to get SESSDATA:**
 1. Log in to bilibili.com in your browser
@@ -59,16 +59,10 @@ To get better search results and video quality, you can provide your Bilibili SE
 3. Find the `SESSDATA` cookie and copy its value
 4. Set the environment variable:
 ```bash
-export SESSDATA="your_sessdata_value_here"
+export BILI_SESSDATA="your_sessdata_value_here"
 ```
 
-The application reads this variable and adds the SESSDATA to its API requests in `src/api.rs`:
-```rust
-// src/api.rs
-let sessdata = std::env::var("SESSDATA").unwrap_or_else(|_| "".to_string());
-// ...
-let response = client.get(&url).header("Cookie", format!("SESSDATA={}", sessdata)).send().await?;
-```
+The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cookie in `src/api.rs`. Requests to protected web endpoints are automatically WBI-signed using keys from Bilibili's navigation API.
 
 **Security Warning**: Storing SESSDATA in environment variables can be a security risk on shared systems. Use with caution.
 
@@ -79,6 +73,7 @@ let response = client.get(&url).header("Cookie", format!("SESSDATA={}", sessdata
 | Key(s) | Action |
 | --- | --- |
 | `q`, `Esc` | Quit or go back |
+| `Ctrl+C` | Quit the application |
 | `j`, `↓` | Move down |
 | `k`, `↑` | Move up |
 | `h`, `←` | Move left (in Moments view) |

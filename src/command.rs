@@ -181,16 +181,7 @@ async fn fetch_first_author_dynamics(app: &mut App) {
 // Individual command handlers
 
 async fn handle_play_url(app: &mut App, url: String) -> Result<(), String> {
-    std::process::Command::new("mpv")
-        .arg("--no-terminal")
-        .arg(&url)
-        .spawn()
-        .map_err(|e| format!("Failed to play video: {}", e))?;
-    add_message(
-        app,
-        format!("Playing: {}", url),
-        crate::app::MessageLevel::Info,
-    );
+    app.launch_mpv(&url);
     Ok(())
 }
 
@@ -217,7 +208,7 @@ async fn handle_show_moments(app: &mut App) -> Result<(), String> {
         crate::app::MessageLevel::Info,
     );
 
-    match api::get_moments().await {
+    match api::get_moments(false).await {
         Ok(following_authors) => {
             let authors = app.following_config.merge_authors(following_authors);
             let count = authors.len();
@@ -539,7 +530,7 @@ async fn handle_refresh_authors(app: &mut App) -> Result<(), String> {
         crate::app::MessageLevel::Info,
     );
 
-    match api::get_moments().await {
+    match api::get_moments(true).await {
         Ok(authors) => {
             let count = authors.len();
             add_message(

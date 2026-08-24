@@ -73,6 +73,10 @@ impl NavigationHandler for App {
             return Ok(false);
         }
 
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(true);
+        }
+
         // Handle overlay modes first
         if self.overlays.command {
             return self.handle_command_mode(key).await;
@@ -177,10 +181,8 @@ impl NavigationHandler for App {
         };
 
         // Execute navigation action
-        match self.execute_navigation(action) {
-            NavigationResult::Quit => Ok(true),
-            NavigationResult::Handled | NavigationResult::Continue => Ok(false),
-        }
+        self.execute_navigation(action);
+        Ok(false)
     }
 
     fn execute_navigation(&mut self, action: NavigationAction) -> NavigationResult {
@@ -217,7 +219,8 @@ impl NavigationHandler for App {
                     self.selected_author.select(None);
                     NavigationResult::Handled
                 } else {
-                    NavigationResult::Quit
+                    self.add_message("Press Ctrl+C to exit".to_string(), MessageLevel::Info);
+                    NavigationResult::Handled
                 }
             }
             NavigationAction::PanelNext => {
@@ -269,6 +272,7 @@ impl App {
     fn load_author_dynamics(&mut self, uid: u64) {
         // Check cache first
         if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
+            self.loading_dynamics = false;
             self.selected_author_dynamics = Some(cached_dynamics.clone());
             self.dynamics_scroll_offset = 0;
             self.selected_dynamic_index = 0;
@@ -292,14 +296,10 @@ impl App {
         if let Some(ref tx) = self.dynamics_tx {
             let tx = tx.clone();
             tokio::spawn(async move {
-                match crate::api::get_user_dynamics(uid).await {
-                    Ok(dynamics) => {
-                        let _ = tx.send((uid, dynamics)).await;
-                    }
-                    Err(_) => {
-                        // Could send error message through another channel if needed
-                    }
-                }
+                let result = crate::api::get_user_dynamics(uid)
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = tx.send((uid, result)).await;
             });
         }
     }
@@ -357,7 +357,7 @@ impl App {
                 name: video.author.clone(),
             },
             stat: crate::api::Stat {
-                view: 0, // Will be populated when fully loaded
+                view: video.play_count(),
                 like: video.like,
                 coin: 0,
                 favorite: 0,
@@ -642,7 +642,7 @@ impl App {
                 self.set_input_mode(InputMode::Normal);
                 self.set_active_page(ActivePage::Search);
             }
-            KeyCode::Char('q') | KeyCode::Esc => {
+            KeyCode::Esc => {
                 self.set_input_mode(InputMode::Normal);
                 self.set_focused_panel(Focusable::Search);
             }

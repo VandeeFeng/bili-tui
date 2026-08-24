@@ -9,6 +9,9 @@ use std::{collections::HashMap, error::Error, io, time::Duration};
 use tokio::sync::mpsc;
 use tui_input::Input;
 
+type DynamicsResponse = (u64, Result<Vec<api::AuthorDynamic>, String>);
+type MpvResponse = std::io::Result<std::process::Output>;
+
 #[derive(PartialEq, Clone, Copy)]
 pub enum Focusable {
     Search,
@@ -40,8 +43,6 @@ pub enum NavigationAction {
 pub enum NavigationResult {
     /// Action was handled
     Handled,
-    /// Should quit application
-    Quit,
     /// Continue with normal processing
     Continue,
 }
@@ -186,13 +187,16 @@ pub struct App {
     // Cache for author dynamics to avoid repeated API calls
     pub author_dynamics_cache: HashMap<u64, Vec<api::AuthorDynamic>>,
     // Channel to handle async dynamics loading
-    pub dynamics_tx: Option<tokio::sync::mpsc::Sender<(u64, Vec<api::AuthorDynamic>)>>,
-    pub dynamics_rx: Option<tokio::sync::mpsc::Receiver<(u64, Vec<api::AuthorDynamic>)>>,
+    pub dynamics_tx: Option<tokio::sync::mpsc::Sender<DynamicsResponse>>,
+    pub dynamics_rx: Option<tokio::sync::mpsc::Receiver<DynamicsResponse>>,
+    mpv_tx: tokio::sync::mpsc::Sender<MpvResponse>,
+    mpv_rx: tokio::sync::mpsc::Receiver<MpvResponse>,
 }
 
 impl App {
     pub fn new() -> Self {
         let (dynamics_tx, dynamics_rx) = tokio::sync::mpsc::channel(32);
+        let (mpv_tx, mpv_rx) = tokio::sync::mpsc::channel(4);
         let following_config = FollowingConfig::load().unwrap_or_default();
         Self {
             search_input: Input::default(),
@@ -217,6 +221,8 @@ impl App {
             author_dynamics_cache: HashMap::new(),
             dynamics_tx: Some(dynamics_tx),
             dynamics_rx: Some(dynamics_rx),
+            mpv_tx,
+            mpv_rx,
         }
     }
 
@@ -306,7 +312,7 @@ impl App {
                     Ok(Some(bvid)) => {
                         let url = format!("https://www.bilibili.com/video/{}", bvid);
                         self.launch_mpv(&url);
-                        self.add_message(format!("Playing: {}", title), MessageLevel::Success);
+                        self.add_message(format!("Opening: {}", title), MessageLevel::Info);
                     }
                     Ok(None) => {
                         self.add_message(
@@ -328,19 +334,19 @@ impl App {
         }
     }
 
-    fn launch_mpv(&mut self, url: &str) {
-        match std::process::Command::new("mpv")
-            .arg("--no-terminal")
-            .arg(url)
-            .spawn()
-        {
-            Ok(_) => {
-                self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
-            }
-            Err(e) => {
-                self.add_message(format!("Failed to start mpv: {}", e), MessageLevel::Warning);
-            }
-        }
+    pub(crate) fn launch_mpv(&mut self, url: &str) {
+        let tx = self.mpv_tx.clone();
+        let url = url.to_string();
+        tokio::spawn(async move {
+            let output = tokio::process::Command::new("mpv")
+                .arg("--msg-color=no")
+                .arg("--msg-level=all=error")
+                .arg(url)
+                .output()
+                .await;
+            let _ = tx.send(output).await;
+        });
+        self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
     }
 
     pub async fn run(mut self) -> Result<(), Box<dyn Error>> {
@@ -352,6 +358,7 @@ impl App {
 
             self.handle_search_response(&mut rx);
             self.handle_dynamics_response();
+            self.handle_mpv_response();
 
             if event::poll(Duration::from_millis(50))?
                 && let Event::Key(key) = event::read()?
@@ -394,24 +401,84 @@ impl App {
         }
     }
 
-    fn handle_dynamics_response(&mut self) {
-        if let Some(ref mut dynamics_rx) = self.dynamics_rx
-            && let Ok((uid, dynamics)) = dynamics_rx.try_recv()
-        {
-            let count = dynamics.len();
-            self.author_dynamics_cache.insert(uid, dynamics.clone());
-
-            if let Some(selected_index) = self.selected_author.selected()
-                && let Some(ref data) = self.moments_data
-                && let Some(author) = data.get(selected_index)
-                && author.user_profile.info.uid == uid
-            {
-                self.selected_author_dynamics = Some(dynamics);
-                self.loading_dynamics = false;
-                self.dynamics_scroll_offset = 0;
-                self.selected_dynamic_index = 0;
-                self.add_message(format!("Loaded {} dynamics", count), MessageLevel::Success);
+    fn handle_mpv_response(&mut self) {
+        let Ok(response) = self.mpv_rx.try_recv() else {
+            return;
+        };
+        let output = match response {
+            Ok(output) if output.status.success() => {
+                self.add_message("Playback finished".to_string(), MessageLevel::Success);
+                return;
             }
+            Ok(output) => output,
+            Err(error) => {
+                self.add_message(format!("Failed to start mpv: {error}"), MessageLevel::Error);
+                return;
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stdout.lines().chain(stderr.lines()) {
+            self.add_message(line.to_string(), MessageLevel::Error);
+        }
+        if stderr.contains("HTTP Error 412") || stdout.contains("HTTP Error 412") {
+            self.add_message(
+                "yt-dlp may be outdated; update it and retry".to_string(),
+                MessageLevel::Warning,
+            );
+        }
+        self.add_message(
+            format!("mpv playback failed ({})", output.status),
+            MessageLevel::Error,
+        );
+    }
+
+    fn handle_dynamics_response(&mut self) {
+        let response = self
+            .dynamics_rx
+            .as_mut()
+            .and_then(|receiver| receiver.try_recv().ok());
+        let Some((uid, result)) = response else {
+            return;
+        };
+        let is_selected = self.is_selected_author(uid);
+        match result {
+            Ok(dynamics) => {
+                self.apply_dynamics(uid, dynamics);
+                if is_selected {
+                    self.loading_dynamics = false;
+                }
+            }
+            Err(error) if is_selected => {
+                self.loading_dynamics = false;
+                self.selected_author_dynamics = None;
+                self.add_message(
+                    format!("Failed to load dynamics: {error}"),
+                    MessageLevel::Error,
+                );
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn is_selected_author(&self, uid: u64) -> bool {
+        self.selected_author.selected().is_some_and(|index| {
+            self.moments_data
+                .as_ref()
+                .and_then(|data| data.get(index))
+                .is_some_and(|author| author.user_profile.info.uid == uid)
+        })
+    }
+
+    fn apply_dynamics(&mut self, uid: u64, dynamics: Vec<api::AuthorDynamic>) {
+        let count = dynamics.len();
+        self.author_dynamics_cache.insert(uid, dynamics.clone());
+        if self.is_selected_author(uid) {
+            self.selected_author_dynamics = Some(dynamics);
+            self.dynamics_scroll_offset = 0;
+            self.selected_dynamic_index = 0;
+            self.add_message(format!("Loaded {count} dynamics"), MessageLevel::Success);
         }
     }
 }

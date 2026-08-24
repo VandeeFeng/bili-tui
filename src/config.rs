@@ -25,6 +25,7 @@ pub struct AuthorInfo {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct FollowingConfig {
+    #[serde(default)]
     pub enable_custom_following: bool,
     #[serde(default)]
     pub custom_authors: Vec<AuthorInfo>,
