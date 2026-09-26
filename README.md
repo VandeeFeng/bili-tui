@@ -51,7 +51,7 @@ For the latest:
     cargo run
     ```
 ### BILI_SESSDATA
-To get better search results and video quality, you can provide your Bilibili SESSDATA via the `BILI_SESSDATA` environment variable.
+To access authenticated API features and improve video availability, you can provide your Bilibili SESSDATA via the `BILI_SESSDATA` environment variable.
 
 **How to get SESSDATA:**
 1. Log in to bilibili.com in your browser
@@ -62,7 +62,7 @@ To get better search results and video quality, you can provide your Bilibili SE
 export BILI_SESSDATA="your_sessdata_value_here"
 ```
 
-The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cookie in `src/api.rs`. Requests to protected web endpoints are automatically WBI-signed using keys from Bilibili's navigation API.
+The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cookie to authenticated API and Bilibili mpv/yt-dlp requests. Public video search omits cookies to avoid Bilibili's verification response. Requests to protected web endpoints are automatically WBI-signed using keys from Bilibili's navigation API.
 
 **Security Warning**: Storing SESSDATA in environment variables can be a security risk on shared systems. Use with caution.
 
@@ -80,11 +80,11 @@ The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cooki
 | `l`, `→` | Move right (in Moments view) |
 | `J`, `Shift+↓` | Scroll content down (in Moments view) |
 | `K`, `Shift+↑` | Scroll content up (in Moments view) |
-| `p` | Play selected video (in Moments or Search Results) |
+| `p` | Play selected video (in Moments, uses the dynamic's video ID directly, or Search Results) |
 | `Enter` | Activate/Select item |
 | `/` | Focus search bar |
 | `m` | Show Moments view |
-| `M` | Show messages popup |
+| `M` | Show messages popup (drag to select within panel, then press `y` to copy via OSC 52) |
 | `:` | Enter command mode |
 | `?` | Show help |
 

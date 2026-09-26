@@ -3,6 +3,20 @@ use crate::ui::traits::WidgetRenderer;
 use ratatui::prelude::*;
 use ratatui::widgets::{Clear, Paragraph};
 
+fn popup_area(area: Rect, app: &App) -> Rect {
+    app.calculate_popup_area(area, area.width * 70 / 100, area.height * 70 / 100)
+}
+
+pub fn messages_content_area(area: Rect, app: &App) -> Rect {
+    let popup = popup_area(area, app);
+    Rect::new(
+        popup.x.saturating_add(1),
+        popup.y.saturating_add(1),
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    )
+}
+
 /// Generic scrollable content renderer for popup windows
 fn render_scrollable_popup(
     f: &mut Frame,
@@ -11,11 +25,8 @@ fn render_scrollable_popup(
     title: &str,
     color: Color,
     scroll_offset: usize,
-) -> Rect {
-    // Calculate popup area to occupy 70% of terminal
-    let popup_width = f.area().width * 70 / 100;
-    let popup_height = f.area().height * 70 / 100;
-    let popup_area = app.calculate_popup_area(f.area(), popup_width, popup_height);
+) {
+    let popup_area = popup_area(f.area(), app);
 
     // Clear the background area to create a clean overlay
     f.render_widget(Clear, popup_area);
@@ -25,22 +36,12 @@ fn render_scrollable_popup(
     let scroll_offset = scroll_offset.min(content.len().saturating_sub(1)); // Clamp to valid range
     let end_line = (scroll_offset + visible_height).min(content.len());
 
-    let visible_content: Vec<Line> = if scroll_offset < content.len() {
-        content[scroll_offset..end_line].to_vec()
-    } else {
-        content[content
-            .len()
-            .saturating_sub(visible_height)
-            .min(content.len())..content.len()]
-            .to_vec()
-    };
+    let visible_content = content[scroll_offset..end_line].to_vec();
 
     let content_panel = Paragraph::new(visible_content)
         .block(app.create_popup_block(title, color))
         .wrap(ratatui::widgets::Wrap { trim: true });
     f.render_widget(content_panel, popup_area);
-
-    popup_area
 }
 
 pub fn render_help_popup(f: &mut Frame, app: &App) {
@@ -172,6 +173,7 @@ pub fn render_messages_popup(f: &mut Frame, app: &App) {
     message_lines.push(Line::from(""));
     message_lines.push(Line::from(""));
     message_lines.push(Line::from("Messages Navigation:".bold().yellow()));
+    message_lines.push(Line::from("  Drag mouse y  - Copy selection"));
     message_lines.push(Line::from("  j/k, ↑/↓           - Scroll messages"));
     message_lines.push(Line::from("  q/Esc              - Close messages"));
 

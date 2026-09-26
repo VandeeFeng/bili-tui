@@ -10,6 +10,15 @@ use tokio::sync::mpsc;
 use tui_input::Input;
 
 type DynamicsResponse = (u64, Result<Vec<api::AuthorDynamic>, String>);
+
+fn is_bilibili_url(url: &str) -> bool {
+    url::Url::parse(url).ok().is_some_and(|parsed| {
+        parsed
+            .host_str()
+            .is_some_and(|host| host == "bilibili.com" || host.ends_with(".bilibili.com"))
+    })
+}
+
 type MpvResponse = std::io::Result<std::process::Output>;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -293,44 +302,23 @@ impl App {
         }
     }
 
-    pub async fn play_dynamic_video(&mut self) {
-        let video_title = self
+    pub fn play_dynamic_video(&mut self) {
+        let video = self
             .selected_author_dynamics
             .as_ref()
             .and_then(|dynamics| dynamics.get(self.selected_dynamic_index))
-            .and_then(|dynamic| dynamic.video_info.as_ref())
-            .map(|video| video.title.clone());
+            .and_then(|dynamic| dynamic.video_info.as_ref());
 
-        match video_title {
-            Some(title) => {
-                self.add_message(
-                    format!("Searching for video: {}", title),
-                    MessageLevel::Info,
-                );
-
-                match crate::api::search_video_by_title(&title).await {
-                    Ok(Some(bvid)) => {
-                        let url = format!("https://www.bilibili.com/video/{}", bvid);
-                        self.launch_mpv(&url);
-                        self.add_message(format!("Opening: {}", title), MessageLevel::Info);
-                    }
-                    Ok(None) => {
-                        self.add_message(
-                            "Video not found in search results".to_string(),
-                            MessageLevel::Warning,
-                        );
-                    }
-                    Err(e) => {
-                        self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
-                    }
-                }
-            }
-            None => {
-                self.add_message(
-                    "Selected dynamic is not a video".to_string(),
-                    MessageLevel::Warning,
-                );
-            }
+        if let Some(video) = video {
+            let url = format!("https://www.bilibili.com/video/{}", video.bvid);
+            let title = video.title.clone();
+            self.launch_mpv(&url);
+            self.add_message(format!("Opening: {title}"), MessageLevel::Info);
+        } else {
+            self.add_message(
+                "Selected dynamic is not a video".to_string(),
+                MessageLevel::Warning,
+            );
         }
     }
 
@@ -338,12 +326,17 @@ impl App {
         let tx = self.mpv_tx.clone();
         let url = url.to_string();
         tokio::spawn(async move {
-            let output = tokio::process::Command::new("mpv")
-                .arg("--msg-color=no")
-                .arg("--msg-level=all=error")
-                .arg(url)
-                .output()
-                .await;
+            let mut command = tokio::process::Command::new("mpv");
+            command.arg("--msg-color=no").arg("--msg-level=all=error");
+            if is_bilibili_url(&url)
+                && let Ok(sessdata) = std::env::var("BILI_SESSDATA")
+                && !sessdata.is_empty()
+            {
+                command.arg(format!(
+                    "--ytdl-raw-options=add-headers=Cookie: SESSDATA={sessdata}"
+                ));
+            }
+            let output = command.arg(url).output().await;
             let _ = tx.send(output).await;
         });
         self.add_message("Starting mpv player...".to_string(), MessageLevel::Info);
@@ -352,24 +345,61 @@ impl App {
     pub async fn run(mut self) -> Result<(), Box<dyn Error>> {
         let mut terminal = terminal::setup_terminal()?;
         let (tx, mut rx) = mpsc::channel(1);
+        let mut selection = terminal::MessagesSelection::default();
+        let mut rendered_messages = None;
 
         let result = loop {
-            terminal.draw(|f| ui::ui(f, &mut self))?;
+            terminal.draw(|f| {
+                ui::ui(f, &mut self);
+                if self.overlays.messages {
+                    let area = ui::components::popups::messages_content_area(f.area(), &self);
+                    selection.draw(f, area);
+                    rendered_messages = Some(f.buffer_mut().clone());
+                } else {
+                    rendered_messages = None;
+                }
+            })?;
 
             self.handle_search_response(&mut rx);
             self.handle_dynamics_response();
             self.handle_mpv_response();
 
-            if event::poll(Duration::from_millis(50))?
-                && let Event::Key(key) = event::read()?
-            {
-                match handle_key_event(&mut self, key, &tx).await {
-                    Ok(true) => break Ok(()),
-                    Ok(false) => continue,
-                    Err(e) if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" => {
-                        break Ok(());
+            if event::poll(Duration::from_millis(50))? {
+                match event::read()? {
+                    Event::Mouse(mouse) if self.overlays.messages => {
+                        if let Some(buffer) = &rendered_messages {
+                            let area =
+                                ui::components::popups::messages_content_area(buffer.area, &self);
+                            if area.width > 0 && area.height > 0 {
+                                selection.handle_mouse(mouse, area);
+                            }
+                        }
                     }
-                    Err(e) => break Err(e.into()),
+                    Event::Key(key)
+                        if self.overlays.messages
+                            && key.code == crossterm::event::KeyCode::Char('y')
+                            && key.kind == crossterm::event::KeyEventKind::Press =>
+                    {
+                        if let Some(buffer) = &rendered_messages {
+                            let area =
+                                ui::components::popups::messages_content_area(buffer.area, &self);
+                            selection.copy(buffer, area)?;
+                        }
+                    }
+                    Event::Key(key) => {
+                        match handle_key_event(&mut self, key, &tx).await {
+                            Ok(true) => break Ok(()),
+                            Ok(false) => {}
+                            Err(e)
+                                if e.kind() == io::ErrorKind::Other && e.to_string() == "quit" =>
+                            {
+                                break Ok(());
+                            }
+                            Err(e) => break Err(e.into()),
+                        }
+                        selection.clear();
+                    }
+                    _ => {}
                 }
             }
         };
@@ -386,13 +416,21 @@ impl App {
             match response {
                 Ok(results) => {
                     self.search_results = results;
-                    if !self.search_results.is_empty() {
+                    if self.search_results.is_empty() {
+                        self.results_list_state.select(None);
+                        self.set_input_mode(InputMode::Normal);
+                        self.set_focused_panel(Focusable::Search);
+                        self.add_message("No videos found".to_string(), MessageLevel::Warning);
+                    } else {
                         self.results_list_state.select(Some(0));
+                        self.set_input_mode(InputMode::ListNav);
+                        self.set_focused_panel(Focusable::Results);
+                        self.add_message(
+                            format!("Found {} videos", self.search_results.len()),
+                            MessageLevel::Success,
+                        );
                     }
-                    self.set_input_mode(InputMode::ListNav);
-                    self.set_focused_panel(Focusable::Results);
                     self.set_active_page(ActivePage::Search);
-                    self.add_message("Search completed".to_string(), MessageLevel::Success);
                 }
                 Err(e) => {
                     self.add_message(format!("Search failed: {}", e), MessageLevel::Error);
@@ -424,7 +462,8 @@ impl App {
         }
         if stderr.contains("HTTP Error 412") || stdout.contains("HTTP Error 412") {
             self.add_message(
-                "yt-dlp may be outdated; update it and retry".to_string(),
+                "Bilibili rejected the request (HTTP 412); browser cookies may be required"
+                    .to_string(),
                 MessageLevel::Warning,
             );
         }
@@ -480,5 +519,19 @@ impl App {
             self.selected_dynamic_index = 0;
             self.add_message(format!("Loaded {count} dynamics"), MessageLevel::Success);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_bilibili_url;
+
+    #[test]
+    fn only_bilibili_hosts_receive_session_cookie() {
+        assert!(is_bilibili_url("https://www.bilibili.com/video/BV1example"));
+        assert!(!is_bilibili_url(
+            "https://bilibili.com.evil.test/video/BV1example"
+        ));
+        assert!(!is_bilibili_url("https://other.example/video/BV1example"));
     }
 }

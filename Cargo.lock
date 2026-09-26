@@ -39,6 +39,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 name = "bili-tui"
 version = "0.1.22"
 dependencies = [
+ "base64",
  "chrono",
  "crossterm 0.29.0",
  "dirs",
@@ -51,6 +52,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "tui-input",
+ "unicode-width 0.2.0",
  "url",
 ]
 

@@ -156,12 +156,10 @@ impl NavigationHandler for App {
                 // Handle play for both search results and dynamics
                 if self.navigation.current_page == ActivePage::Moments
                     && self.navigation.focused_panel == Focusable::MomentsContent
-                    && self.navigation.input_mode == InputMode::ListNav
                 {
                     // Play video from selected dynamic
-                    self.play_dynamic_video().await;
-                } else {
-                    // Play video from search results or detail page
+                    self.play_dynamic_video();
+                } else if self.navigation.current_page != ActivePage::Moments {
                     self.play_video();
                 }
                 return Ok(false);

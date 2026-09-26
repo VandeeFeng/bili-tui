@@ -7,6 +7,7 @@ use std::{
 
 static CLIENT: OnceLock<BilibiliClient> = OnceLock::new();
 const API_ORIGIN: &str = "https://api.bilibili.com";
+const SEARCH_API_PATH: &str = "/x/web-interface/wbi/search/type";
 const REFERER: &str = "https://www.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
@@ -120,6 +121,10 @@ impl BilibiliClient {
     }
 
     async fn get_text(&self, path: &str, query: &Query) -> Result<String, ApiError> {
+        // Fresh device cookies can cause public search to return a verification voucher instead of results.
+        if path == SEARCH_API_PATH {
+            return self.send_get(path, query, "").await;
+        }
         let cookies = self.cookie_header().await?;
         self.send_get(path, query, &cookies).await
     }
@@ -294,6 +299,17 @@ struct SearchData {
     result: Option<Vec<VideoResult>>,
 }
 
+impl SearchData {
+    fn into_videos(self) -> Result<Vec<VideoResult>, ApiError> {
+        Ok(self
+            .result
+            .ok_or("Bilibili search returned no result list (verification may be required)")?
+            .into_iter()
+            .filter(|result| result.r#type == "video")
+            .collect())
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct VideoResult {
     pub r#type: String,
@@ -336,15 +352,10 @@ pub async fn search(
         ("page_size".into(), "20".into()),
     ]);
     let data: SearchData = BilibiliClient::get()?
-        .get_api("/x/web-interface/wbi/search/type", query, true)
+        .get_api(SEARCH_API_PATH, query, true)
         .await?;
 
-    Ok(data
-        .result
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|result| result.r#type == "video")
-        .collect())
+    data.into_videos()
 }
 
 pub async fn get_video_info(
@@ -503,6 +514,7 @@ pub struct ModuleMajor {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct ArchiveInfo {
+    pub bvid: String,
     pub title: String,
     #[serde(rename = "duration_text")]
     pub duration_text: String,
@@ -533,28 +545,6 @@ pub struct AuthorDynamic {
     pub author_name: String,
     pub stats: Option<ModuleStat>,
     pub video_info: Option<ArchiveInfo>,
-}
-
-// Function to get dynamics for a specific user using space API
-// Search for a video by title and return its bvid
-pub async fn search_video_by_title(
-    title: &str,
-) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let videos = search(title).await?;
-
-    // Return the bvid of the first video that matches the title exactly
-    for video in &videos {
-        if video.title == title {
-            return Ok(Some(video.bvid.clone()));
-        }
-    }
-
-    // If no exact match, return the first video's bvid
-    if let Some(first_video) = videos.first() {
-        Ok(Some(first_video.bvid.clone()))
-    } else {
-        Ok(None)
-    }
 }
 
 pub async fn get_user_dynamics(
@@ -621,6 +611,26 @@ mod tests {
             generate_mixin_key(&keys),
             "1022a87ffdaf532cb45ee953dce8c96d"
         );
+    }
+
+    #[test]
+    fn rejects_search_verification_voucher() {
+        let data: SearchData = serde_json::from_str(r#"{"v_voucher":"challenge"}"#).unwrap();
+        assert!(
+            data.into_videos()
+                .unwrap_err()
+                .to_string()
+                .contains("verification")
+        );
+    }
+
+    #[test]
+    fn reads_video_bvid_from_dynamic_archive() {
+        let archive: ArchiveInfo = serde_json::from_str(
+            r#"{"bvid":"BV1example","title":"test","duration_text":"1:00","stat":{"play":"123"}}"#,
+        )
+        .unwrap();
+        assert_eq!(archive.bvid, "BV1example");
     }
 
     #[test]
