@@ -475,6 +475,8 @@ struct SpaceDynamicData {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct SpaceItem {
+    #[serde(default)]
+    id_str: Option<String>,
     modules: SpaceModules,
 }
 
@@ -511,6 +513,15 @@ pub struct ModuleDesc {
 pub struct ModuleMajor {
     #[serde(default)]
     archive: Option<ArchiveInfo>,
+    #[serde(default)]
+    opus: Option<OpusInfo>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct OpusInfo {
+    summary: Option<ModuleDesc>,
+    #[serde(default)]
+    pics: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -546,6 +557,10 @@ pub struct AuthorDynamic {
     pub author_name: String,
     pub stats: Option<ModuleStat>,
     pub video_info: Option<ArchiveInfo>,
+    #[serde(default)]
+    pub has_images: bool,
+    #[serde(default)]
+    pub opus_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -576,6 +591,31 @@ fn save_dynamics(uid: u64, items: &[AuthorDynamic]) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn parse_dynamic(item: SpaceItem) -> Option<AuthorDynamic> {
+    let author = item.modules.module_author.as_ref()?;
+    let dynamic = item.modules.module_dynamic.as_ref()?;
+    let opus = dynamic.major.as_ref().and_then(|major| major.opus.as_ref());
+    let content = dynamic
+        .desc
+        .as_ref()
+        .or_else(|| opus.and_then(|opus| opus.summary.as_ref()))
+        .map(|desc| desc.text.clone())
+        .unwrap_or_default();
+    let has_images = opus.is_some_and(|opus| !opus.pics.is_empty());
+    Some(AuthorDynamic {
+        content,
+        timestamp: author.pub_ts.parse().unwrap_or_default(),
+        author_name: author.name.clone(),
+        stats: item.modules.module_stat,
+        video_info: dynamic
+            .major
+            .as_ref()
+            .and_then(|major| major.archive.clone()),
+        has_images,
+        opus_id: has_images.then_some(item.id_str).flatten(),
+    })
+}
+
 pub async fn get_user_dynamics(
     uid: u64,
 ) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
@@ -604,33 +644,8 @@ pub async fn get_user_dynamics(
         Err(error) => return Err(error),
     };
 
-    let mut dynamics: Vec<AuthorDynamic> = data
-        .items
-        .into_iter()
-        .filter_map(|item| {
-            let author = item.modules.module_author.as_ref()?;
-            let dynamic_content = item.modules.module_dynamic.as_ref()?;
-
-            let content = dynamic_content
-                .desc
-                .as_ref()
-                .map(|desc| desc.text.clone())
-                .unwrap_or_default();
-
-            let video_info = dynamic_content
-                .major
-                .as_ref()
-                .and_then(|major| major.archive.clone());
-
-            Some(AuthorDynamic {
-                content,
-                timestamp: author.pub_ts.parse().unwrap_or_default(),
-                author_name: author.name.clone(),
-                stats: item.modules.module_stat,
-                video_info,
-            })
-        })
-        .collect();
+    let mut dynamics: Vec<AuthorDynamic> =
+        data.items.into_iter().filter_map(parse_dynamic).collect();
 
     dynamics.sort_by_key(|dynamic| std::cmp::Reverse(dynamic.timestamp));
     if dynamics.is_empty() {
@@ -674,24 +689,26 @@ mod tests {
     }
 
     #[test]
-    fn space_feed_accepts_missing_modules() {
+    fn parses_space_dynamics() {
         let feed: SpaceDynamicData = serde_json::from_str(
-            r#"{"items":[{"modules":{"module_dynamic":{"desc":{"text":"ok"}}}},
-            {"modules":{"module_author":{"name":"author","pub_ts":"123"},
-            "module_dynamic":{"desc":{"text":"ok"}}}}]}"#,
+            r#"{"items":[
+                {"modules":{"module_dynamic":{"desc":{"text":"ignored"}}}},
+                {"id_str":"123","modules":{"module_author":{"name":"author","pub_ts":"123"},
+                    "module_dynamic":{"desc":null,"major":{"opus":{"summary":{"text":"caption"},"pics":[{}]}}}}},
+                {"modules":{"module_author":{"name":"author","pub_ts":"124"},
+                    "module_dynamic":{"desc":{"text":"video"},"major":{"archive":
+                    {"bvid":"BV1example","title":"test","duration_text":"1:00","stat":{"play":"123"}}}}}}
+            ]}"#,
         )
         .unwrap();
-        assert!(feed.items[0].modules.module_author.is_none());
-        assert!(feed.items[1].modules.module_dynamic.is_some());
-    }
-
-    #[test]
-    fn reads_video_bvid_from_dynamic_archive() {
-        let archive: ArchiveInfo = serde_json::from_str(
-            r#"{"bvid":"BV1example","title":"test","duration_text":"1:00","stat":{"play":"123"}}"#,
-        )
-        .unwrap();
-        assert_eq!(archive.bvid, "BV1example");
+        let mut items = feed.items.into_iter();
+        assert!(parse_dynamic(items.next().unwrap()).is_none());
+        let opus = parse_dynamic(items.next().unwrap()).unwrap();
+        assert_eq!(opus.content, "caption");
+        assert!(opus.has_images);
+        assert_eq!(opus.opus_id.as_deref(), Some("123"));
+        let video = parse_dynamic(items.next().unwrap()).unwrap();
+        assert_eq!(video.video_info.unwrap().bvid, "BV1example");
     }
 
     #[test]

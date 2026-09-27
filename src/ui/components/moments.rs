@@ -152,6 +152,18 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
                     content.push(Line::from(""));
                 }
 
+                if dynamic.has_images {
+                    content.push(Line::from("[images]"));
+                    content.push(Line::from(""));
+                    if let Some(id) = &dynamic.opus_id {
+                        content.push(Line::from(vec![
+                            "Url: ".bold(),
+                            Span::raw(format!("https://www.bilibili.com/opus/{id}")).underlined(),
+                        ]));
+                    }
+                    content.push(Line::from(""));
+                }
+
                 // Video info if available
                 if let Some(video) = &dynamic.video_info {
                     content.push(Line::from("📹 Video:".bold()));

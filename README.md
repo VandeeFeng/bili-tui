@@ -127,4 +127,5 @@ The application supports custom following management, allowing you to manually c
 - Blacklisted authors are filtered out regardless of which following mode is active
 - API author lists are cached for 15 minutes in `~/.bili-tui/following.json` separately from custom authors; use `:refresh` to update them immediately
 - Author dynamics are cached for 15 minutes under `~/.bili-tui/dynamics/`; expired data is used if the API request fails
+- Image dynamics show their caption, an `[images]` marker, and a link to the original post; images are not rendered in the terminal. Ctrl+click an HTTP(S) URL to open it with `xdg-open` on Linux; supported terminals show a hand cursor on hover.
 - All changes are automatically saved to the configuration file

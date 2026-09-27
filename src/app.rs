@@ -346,6 +346,8 @@ impl App {
         let (tx, mut rx) = mpsc::channel(1);
         let mut selection = terminal::MessagesSelection::default();
         let mut rendered_messages = None;
+        let mut rendered_moments = None;
+        let mut hovering_link = false;
 
         let result = loop {
             terminal.draw(|f| {
@@ -357,7 +359,17 @@ impl App {
                 } else {
                     rendered_messages = None;
                 }
+                rendered_moments = (self.active_page() == ActivePage::Moments
+                    && !self.overlays.messages
+                    && !self.overlays.help
+                    && !self.is_commanding()
+                    && !self.show_error_popup)
+                    .then(|| f.buffer_mut().clone());
             })?;
+            if rendered_moments.is_none() && hovering_link {
+                terminal::set_link_hover(false)?;
+                hovering_link = false;
+            }
 
             self.handle_search_response(&mut rx);
             self.handle_dynamics_response();
@@ -372,6 +384,33 @@ impl App {
                             if area.width > 0 && area.height > 0 {
                                 selection.handle_mouse(mouse, area);
                             }
+                        }
+                    }
+                    Event::Mouse(mouse) => {
+                        let url = rendered_moments.as_ref().and_then(|buffer| {
+                            terminal::http_url_at(buffer, mouse.column, mouse.row)
+                        });
+                        if mouse.kind == crossterm::event::MouseEventKind::Moved
+                            && hovering_link != url.is_some()
+                        {
+                            hovering_link = url.is_some();
+                            terminal::set_link_hover(hovering_link)?;
+                        }
+                        if mouse.kind
+                            == crossterm::event::MouseEventKind::Down(
+                                crossterm::event::MouseButton::Left,
+                            )
+                            && mouse
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                            && let Some(url) = url
+                            && let Err(error) =
+                                std::process::Command::new("xdg-open").arg(url).spawn()
+                        {
+                            self.add_message(
+                                format!("Failed to open URL: {error}"),
+                                MessageLevel::Error,
+                            );
                         }
                     }
                     Event::Key(key)

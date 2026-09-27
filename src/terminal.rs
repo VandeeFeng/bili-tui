@@ -117,6 +117,38 @@ impl MessagesSelection {
     }
 }
 
+pub fn http_url_at(buffer: &Buffer, column: u16, row: u16) -> Option<String> {
+    let row: String = (buffer.area.x..buffer.area.right())
+        .filter_map(|x| buffer.cell((x, row)))
+        .map(|cell| cell.symbol())
+        .collect();
+    let column = usize::from(column.saturating_sub(buffer.area.x));
+    for (start, _) in row
+        .match_indices("https://")
+        .chain(row.match_indices("http://"))
+    {
+        let url: String = row[start..]
+            .chars()
+            .take_while(char::is_ascii_graphic)
+            .collect();
+        let left = row[..start].chars().count();
+        if (left..left + url.len()).contains(&column)
+            && url::Url::parse(&url).is_ok_and(|parsed| parsed.host_str().is_some())
+        {
+            return Some(url);
+        }
+    }
+    None
+}
+
+pub fn set_link_hover(hovered: bool) -> io::Result<()> {
+    let shape = if hovered { "pointer" } else { "default" };
+    execute!(
+        io::stdout(),
+        crossterm::style::Print(format!("\u{1b}]22;{shape}\u{1b}\\"))
+    )
+}
+
 fn clamp_point(point: (u16, u16), area: Rect) -> (u16, u16) {
     (
         point.0.clamp(area.x, area.right() - 1),
@@ -136,6 +168,7 @@ pub fn setup_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>, B
 pub fn restore_terminal(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) -> Result<(), Box<dyn Error>> {
+    set_link_hover(false)?;
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -149,6 +182,27 @@ pub fn restore_terminal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detects_http_urls_at_mouse_position() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 2));
+        buffer.set_string(
+            0,
+            1,
+            "│ Url: https://example.com/post/12345│",
+            Style::default(),
+        );
+        assert_eq!(
+            http_url_at(&buffer, 14, 1).as_deref(),
+            Some("https://example.com/post/12345")
+        );
+        assert_eq!(http_url_at(&buffer, 3, 1), None);
+        buffer.set_string(0, 0, "http://example.org/path", Style::default());
+        assert_eq!(
+            http_url_at(&buffer, 2, 0).as_deref(),
+            Some("http://example.org/path")
+        );
+    }
 
     #[test]
     fn selection_copies_only_overlay_content() {
