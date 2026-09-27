@@ -142,42 +142,6 @@ fn extract_bvid(input: &str) -> Option<String> {
     None
 }
 
-async fn fetch_first_author_dynamics(app: &mut App) {
-    let uid = if let Some(data) = &app.moments_data {
-        if let Some(first_author) = data.first() {
-            first_author.user_profile.info.uid
-        } else {
-            return;
-        }
-    } else {
-        return;
-    };
-
-    app.loading_dynamics = true;
-
-    match api::get_user_dynamics(uid).await {
-        Ok(dynamics) => {
-            let count = dynamics.len();
-            app.selected_author_dynamics = Some(dynamics);
-            add_message(
-                app,
-                format!("Loaded {} dynamics", count),
-                crate::app::MessageLevel::Success,
-            );
-        }
-        Err(e) => {
-            add_message(
-                app,
-                format!("Failed to load dynamics: {}", e),
-                crate::app::MessageLevel::Error,
-            );
-            app.selected_author_dynamics = None;
-        }
-    }
-
-    app.loading_dynamics = false;
-}
-
 // Individual command handlers
 
 async fn handle_play_url(app: &mut App, url: String) -> Result<(), String> {
@@ -219,7 +183,8 @@ async fn handle_show_moments(app: &mut App) -> Result<(), String> {
 
             if !app.moments_data.as_ref().unwrap().is_empty() {
                 app.selected_author.select(Some(0));
-                fetch_first_author_dynamics(app).await;
+                let uid = app.moments_data.as_ref().unwrap()[0].user_profile.info.uid;
+                app.load_author_dynamics(uid);
             }
             add_message(
                 app,
@@ -276,7 +241,8 @@ async fn handle_show_favorites(app: &mut App) -> Result<(), String> {
 
     if !app.moments_data.as_ref().unwrap().is_empty() {
         app.selected_author.select(Some(0));
-        fetch_first_author_dynamics(app).await;
+        let uid = app.moments_data.as_ref().unwrap()[0].user_profile.info.uid;
+        app.load_author_dynamics(uid);
     }
     add_message(
         app,

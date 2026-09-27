@@ -5,7 +5,7 @@ use crate::terminal;
 use crate::ui;
 use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
-use std::{collections::HashMap, error::Error, io, time::Duration};
+use std::{collections::HashSet, error::Error, io, time::Duration};
 use tokio::sync::mpsc;
 use tui_input::Input;
 
@@ -193,8 +193,7 @@ pub struct App {
     pub dynamics_scroll_offset: usize,
     pub selected_dynamic_index: usize,
     pub dynamics_viewport_height: usize,
-    // Cache for author dynamics to avoid repeated API calls
-    pub author_dynamics_cache: HashMap<u64, Vec<api::AuthorDynamic>>,
+    pub pending_dynamics: HashSet<u64>,
     // Channel to handle async dynamics loading
     pub dynamics_tx: Option<tokio::sync::mpsc::Sender<DynamicsResponse>>,
     pub dynamics_rx: Option<tokio::sync::mpsc::Receiver<DynamicsResponse>>,
@@ -227,7 +226,7 @@ impl App {
             dynamics_scroll_offset: 0,
             selected_dynamic_index: 0,
             dynamics_viewport_height: 20, // Default value
-            author_dynamics_cache: HashMap::new(),
+            pending_dynamics: HashSet::new(),
             dynamics_tx: Some(dynamics_tx),
             dynamics_rx: Some(dynamics_rx),
             mpv_tx,
@@ -481,6 +480,7 @@ impl App {
         let Some((uid, result)) = response else {
             return;
         };
+        self.pending_dynamics.remove(&uid);
         let is_selected = self.is_selected_author(uid);
         match result {
             Ok(dynamics) => {
@@ -512,7 +512,6 @@ impl App {
 
     fn apply_dynamics(&mut self, uid: u64, dynamics: Vec<api::AuthorDynamic>) {
         let count = dynamics.len();
-        self.author_dynamics_cache.insert(uid, dynamics.clone());
         if self.is_selected_author(uid) {
             self.selected_author_dynamics = Some(dynamics);
             self.dynamics_scroll_offset = 0;

@@ -267,20 +267,7 @@ impl App {
     }
 
     /// Load dynamics for a specific author
-    fn load_author_dynamics(&mut self, uid: u64) {
-        // Check cache first
-        if let Some(cached_dynamics) = self.author_dynamics_cache.get(&uid) {
-            self.loading_dynamics = false;
-            self.selected_author_dynamics = Some(cached_dynamics.clone());
-            self.dynamics_scroll_offset = 0;
-            self.selected_dynamic_index = 0;
-            self.add_message(
-                format!("Loaded {} dynamics from cache", cached_dynamics.len()),
-                MessageLevel::Info,
-            );
-            return;
-        }
-
+    pub(crate) fn load_author_dynamics(&mut self, uid: u64) {
         self.add_message(
             format!("Loading dynamics for UID: {}", uid),
             MessageLevel::Info,
@@ -289,6 +276,9 @@ impl App {
         self.selected_author_dynamics = None;
         self.dynamics_scroll_offset = 0;
         self.selected_dynamic_index = 0;
+        if !self.pending_dynamics.insert(uid) {
+            return;
+        }
 
         // Start async loading
         if let Some(ref tx) = self.dynamics_tx {

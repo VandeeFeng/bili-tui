@@ -107,7 +107,7 @@ The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cooki
 
 The application supports custom following management, allowing you to manually configure which authors to follow and which to blacklist:
 
-**Configuration File**: Settings are stored in `~/.config/bili-tui/following.json`
+**Configuration File**: Settings are stored in `~/.bili-tui/following.json`
 
 **Features**:
 - **Custom Following**: Manually add specific authors by UID to your following list
@@ -125,5 +125,6 @@ The application supports custom following management, allowing you to manually c
 **Notes**:
 - When custom following is enabled, only manually added authors will appear
 - Blacklisted authors are filtered out regardless of which following mode is active
-- Use `:refresh` to update authors from API when using API following mode
+- API author lists are cached for 15 minutes in `~/.bili-tui/following.json` separately from custom authors; use `:refresh` to update them immediately
+- Author dynamics are cached for 15 minutes under `~/.bili-tui/dynamics/`; expired data is used if the API request fails
 - All changes are automatically saved to the configuration file

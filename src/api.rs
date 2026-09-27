@@ -1,4 +1,5 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::{
     collections::BTreeMap,
     sync::{OnceLock, RwLock},
@@ -8,6 +9,7 @@ use std::{
 static CLIENT: OnceLock<BilibiliClient> = OnceLock::new();
 const API_ORIGIN: &str = "https://api.bilibili.com";
 const SEARCH_API_PATH: &str = "/x/web-interface/wbi/search/type";
+const MOMENTS_CACHE_TTL: u64 = 15 * 60;
 const REFERER: &str = "https://www.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
@@ -404,7 +406,7 @@ struct MomentsUpItem {
 pub async fn get_moments(
     force_refresh: bool,
 ) -> Result<Vec<AuthorItem>, Box<dyn std::error::Error + Send + Sync>> {
-    let config = crate::config::FollowingConfig::load()?;
+    let mut config = crate::config::FollowingConfig::load()?;
 
     if config.enable_custom_following {
         let mut authors = config.to_author_items();
@@ -412,10 +414,16 @@ pub async fn get_moments(
         return Ok(authors);
     }
 
-    let mut authors = if force_refresh {
-        Vec::new()
+    let cached = config.to_cached_author_items();
+    let cache_age = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(config.cached_at);
+    let mut authors = if !force_refresh && cache_age < MOMENTS_CACHE_TTL {
+        cached.clone()
     } else {
-        load_moments_from_cache().unwrap_or_default()
+        Vec::new()
     };
 
     if authors.is_empty() {
@@ -423,9 +431,18 @@ pub async fn get_moments(
             ("up_list_more".into(), "1".into()),
             ("web_location".into(), "333.1365".into()),
         ]);
-        let data: MomentsPortalData = BilibiliClient::get()?
+        let data: MomentsPortalData = match BilibiliClient::get()?
             .get_api("/x/polymer/web-dynamic/v1/portal", query, true)
-            .await?;
+            .await
+        {
+            Ok(data) => data,
+            Err(_) if !force_refresh && !cached.is_empty() => {
+                let mut authors = cached;
+                authors.retain(|author| !config.is_blacklisted(author.user_profile.info.uid));
+                return Ok(authors);
+            }
+            Err(error) => return Err(error),
+        };
 
         authors = data
             .up_list
@@ -441,28 +458,12 @@ pub async fn get_moments(
                 },
             })
             .collect();
-        save_moments_to_cache(&authors)?;
+        config.update_from_api_data(&authors);
+        let _ = config.save();
     }
 
     authors.retain(|author| !config.is_blacklisted(author.user_profile.info.uid));
     Ok(authors)
-}
-
-fn load_moments_from_cache() -> Option<Vec<AuthorItem>> {
-    let config = crate::config::FollowingConfig::load().ok()?;
-    if config.custom_authors.is_empty() {
-        return None;
-    }
-    Some(config.to_author_items())
-}
-
-fn save_moments_to_cache(
-    authors: &[AuthorItem],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut config = crate::config::FollowingConfig::load()?;
-    config.update_from_api_data(authors);
-    config.save()?;
-    Ok(())
 }
 
 // Space API structures for user dynamics
@@ -479,10 +480,10 @@ pub struct SpaceItem {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct SpaceModules {
-    #[serde(rename = "module_author")]
-    module_author: ModuleAuthor,
-    #[serde(rename = "module_dynamic")]
-    module_dynamic: ModuleDynamic,
+    #[serde(rename = "module_author", default)]
+    module_author: Option<ModuleAuthor>,
+    #[serde(rename = "module_dynamic", default)]
+    module_dynamic: Option<ModuleDynamic>,
     #[serde(rename = "module_stat", default)]
     module_stat: Option<ModuleStat>,
 }
@@ -512,7 +513,7 @@ pub struct ModuleMajor {
     archive: Option<ArchiveInfo>,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ArchiveInfo {
     pub bvid: String,
     pub title: String,
@@ -521,24 +522,24 @@ pub struct ArchiveInfo {
     pub stat: ArchiveStat,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ArchiveStat {
     pub play: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ModuleStat {
     pub comment: StatItem,
     pub forward: StatItem,
     pub like: StatItem,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct StatItem {
     pub count: u64,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct AuthorDynamic {
     pub content: String,
     pub timestamp: u64,
@@ -547,23 +548,68 @@ pub struct AuthorDynamic {
     pub video_info: Option<ArchiveInfo>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct CachedDynamics {
+    saved_at: u64,
+    items: Vec<AuthorDynamic>,
+}
+
+fn dynamics_cache_path(uid: u64) -> Option<std::path::PathBuf> {
+    Some(
+        crate::config::data_dir()?
+            .join("dynamics")
+            .join(format!("{uid}.json")),
+    )
+}
+
+fn save_dynamics(uid: u64, items: &[AuthorDynamic]) -> Result<(), ApiError> {
+    let path = dynamics_cache_path(uid).ok_or("Could not find cache directory")?;
+    fs::create_dir_all(path.parent().ok_or("Invalid cache path")?)?;
+    let saved_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    fs::write(
+        path,
+        serde_json::to_vec(&CachedDynamics {
+            saved_at,
+            items: items.to_vec(),
+        })?,
+    )?;
+    Ok(())
+}
+
 pub async fn get_user_dynamics(
     uid: u64,
 ) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
+    let cached: Option<CachedDynamics> = dynamics_cache_path(uid)
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    if let Some(cache) = &cached
+        && !cache.items.is_empty()
+        && now.saturating_sub(cache.saved_at) < MOMENTS_CACHE_TTL
+    {
+        return Ok(cache.items.clone());
+    }
     let query = Query::from([
         ("host_mid".into(), uid.to_string()),
         ("features".into(), "itemOpusStyle".into()),
     ]);
-    let data: SpaceDynamicData = BilibiliClient::get()?
+    let data: SpaceDynamicData = match BilibiliClient::get()?
         .get_api("/x/polymer/web-dynamic/v1/feed/space", query, true)
-        .await?;
+        .await
+    {
+        Ok(data) => data,
+        Err(_) if cached.as_ref().is_some_and(|cache| !cache.items.is_empty()) => {
+            return Ok(cached.unwrap().items);
+        }
+        Err(error) => return Err(error),
+    };
 
     let mut dynamics: Vec<AuthorDynamic> = data
         .items
         .into_iter()
-        .map(|item| {
-            let author = &item.modules.module_author;
-            let dynamic_content = &item.modules.module_dynamic;
+        .filter_map(|item| {
+            let author = item.modules.module_author.as_ref()?;
+            let dynamic_content = item.modules.module_dynamic.as_ref()?;
 
             let content = dynamic_content
                 .desc
@@ -576,18 +622,21 @@ pub async fn get_user_dynamics(
                 .as_ref()
                 .and_then(|major| major.archive.clone());
 
-            AuthorDynamic {
+            Some(AuthorDynamic {
                 content,
                 timestamp: author.pub_ts.parse().unwrap_or_default(),
                 author_name: author.name.clone(),
                 stats: item.modules.module_stat,
                 video_info,
-            }
+            })
         })
         .collect();
 
     dynamics.sort_by_key(|dynamic| std::cmp::Reverse(dynamic.timestamp));
-
+    if dynamics.is_empty() {
+        return Ok(cached.map_or(dynamics, |cache| cache.items));
+    }
+    let _ = save_dynamics(uid, &dynamics);
     Ok(dynamics)
 }
 
@@ -622,6 +671,18 @@ mod tests {
                 .to_string()
                 .contains("verification")
         );
+    }
+
+    #[test]
+    fn space_feed_accepts_missing_modules() {
+        let feed: SpaceDynamicData = serde_json::from_str(
+            r#"{"items":[{"modules":{"module_dynamic":{"desc":{"text":"ok"}}}},
+            {"modules":{"module_author":{"name":"author","pub_ts":"123"},
+            "module_dynamic":{"desc":{"text":"ok"}}}}]}"#,
+        )
+        .unwrap();
+        assert!(feed.items[0].modules.module_author.is_none());
+        assert!(feed.items[1].modules.module_dynamic.is_some());
     }
 
     #[test]

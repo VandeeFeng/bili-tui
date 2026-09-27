@@ -1,6 +1,5 @@
 use crate::api::AuthorItem;
-use serde::ser::SerializeStruct;
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
@@ -23,32 +22,21 @@ pub struct AuthorInfo {
     pub username: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FollowingConfig {
     #[serde(default)]
     pub enable_custom_following: bool,
     #[serde(default)]
     pub custom_authors: Vec<AuthorInfo>,
     #[serde(default)]
+    pub cached_authors: Vec<AuthorInfo>,
+    #[serde(default)]
+    pub cached_at: u64,
+    #[serde(default)]
     pub favorites: Vec<AuthorInfo>,
     #[serde(default)]
     pub blacklist: Vec<AuthorInfo>,
     pub last_updated: u64,
-}
-
-impl Serialize for FollowingConfig {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("FollowingConfig", 5)?;
-        state.serialize_field("enable_custom_following", &self.enable_custom_following)?;
-        state.serialize_field("custom_authors", &self.custom_authors)?;
-        state.serialize_field("favorites", &self.favorites)?;
-        state.serialize_field("blacklist", &self.blacklist)?;
-        state.serialize_field("last_updated", &self.last_updated)?;
-        state.end()
-    }
 }
 
 impl FollowingConfig {
@@ -69,14 +57,8 @@ impl FollowingConfig {
             return Ok(config);
         }
 
-        let config: FollowingConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("Invalid JSON in config file: {}. Creating new config.", e))?;
-
-        if !content.contains("\"favorites\"") {
-            config.save()?;
-        }
-
-        Ok(config)
+        serde_json::from_str(&content)
+            .map_err(|error| format!("Invalid JSON in config file: {error}").into())
     }
 
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -170,7 +152,7 @@ impl FollowingConfig {
     }
 
     pub fn update_from_api_data(&mut self, authors: &[AuthorItem]) {
-        self.custom_authors = authors
+        self.cached_authors = authors
             .iter()
             .map(|author| AuthorInfo {
                 uid: author.user_profile.info.uid,
@@ -179,6 +161,11 @@ impl FollowingConfig {
             .collect();
 
         self.update_timestamp();
+        self.cached_at = self.last_updated;
+    }
+
+    pub fn to_cached_author_items(&self) -> Vec<AuthorItem> {
+        self.cached_authors.iter().map(AuthorItem::from).collect()
     }
 
     pub fn to_author_items(&self) -> Vec<AuthorItem> {
@@ -205,10 +192,35 @@ impl FollowingConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_cache_does_not_replace_custom_authors() {
+        let mut config = FollowingConfig::default();
+        config.add_custom_author(1, "custom".into());
+        config.update_from_api_data(&[AuthorItem::from(&AuthorInfo {
+            uid: 2,
+            username: "api".into(),
+        })]);
+
+        let restored: FollowingConfig =
+            serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+        assert_eq!(restored.to_author_items()[0].user_profile.info.uid, 1);
+        assert_eq!(
+            restored.to_cached_author_items()[0].user_profile.info.uid,
+            2
+        );
+    }
+}
+
+pub(crate) fn data_dir() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".bili-tui"))
+}
+
 fn get_config_path() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let config_dir = dirs::config_dir()
-        .ok_or("Could not find config directory")?
-        .join("bili-tui");
+    let config_dir = data_dir().ok_or("Could not find home directory")?;
 
     Ok(config_dir.join("following.json"))
 }
