@@ -92,6 +92,7 @@ pub fn render_help_popup(f: &mut Frame, app: &App) {
         Line::from("  Shift+J/K / Shift+↑/↓ - Scroll dynamics content view"),
         Line::from("  Enter (authors)    - Load author's dynamics"),
         Line::from("  p                  - Play selected dynamic video"),
+        Line::from("  r                  - Refresh selected author (once per minute)"),
         Line::from("  q/Esc              - Exit moments mode"),
         Line::from(""),
         Line::from("Detail View:".bold().yellow()),

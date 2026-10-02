@@ -84,6 +84,7 @@ The application reads `BILI_SESSDATA` and adds its value as the `SESSDATA` cooki
 | `Enter` | Activate/Select item |
 | `/` | Focus search bar |
 | `m` | Show Moments view |
+| `r` | Force-refresh the selected author's dynamics in Moments (global 60-second cooldown) |
 | `M` | Show messages popup (drag to select within panel, then press `y` to copy via OSC 52) |
 | `:` | Enter command mode |
 | `?` | Show help |
@@ -126,6 +127,8 @@ The application supports custom following management, allowing you to manually c
 - When custom following is enabled, only manually added authors will appear
 - Blacklisted authors are filtered out regardless of which following mode is active
 - API author lists are cached for 15 minutes in `~/.bili-tui/following.json` separately from custom authors; use `:refresh` to update them immediately
-- Author dynamics are cached for 15 minutes under `~/.bili-tui/dynamics/`; expired data is used if the API request fails
+- Author dynamics are cached in memory and under `~/.bili-tui/dynamics/` for 15 minutes; confirmed empty results are cached for 30 seconds. Cache hits do not add loading messages. Disk-cache write failures are reported without discarding fetched data.
+- In Moments, `r` bypasses both memory and disk caches to refresh the selected author. Manual refreshes share a 60-second cooldown across authors; failed requests also consume the cooldown. Refreshing preserves the existing content, and loading/busy attempts do not consume the cooldown.
+- Author selection waits 200 ms before loading, and dynamic API fetches are serialized. Failed or empty fetches are retried once after 500 ms; missing `items` or entirely unsupported entries are reported as errors. Expired nonempty data is used on failure or empty responses, with a warning.
 - Image dynamics show their caption, an `[images]` marker, and a link to the original post; images are not rendered in the terminal. Ctrl+click an HTTP(S) URL to open it with `xdg-open` on Linux; supported terminals show a hand cursor on hover.
 - All changes are automatically saved to the configuration file

@@ -10,6 +10,7 @@ static CLIENT: OnceLock<BilibiliClient> = OnceLock::new();
 const API_ORIGIN: &str = "https://api.bilibili.com";
 const SEARCH_API_PATH: &str = "/x/web-interface/wbi/search/type";
 const MOMENTS_CACHE_TTL: u64 = 15 * 60;
+const EMPTY_DYNAMICS_CACHE_TTL: u64 = 30;
 const REFERER: &str = "https://www.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
@@ -469,7 +470,6 @@ pub async fn get_moments(
 // Space API structures for user dynamics
 #[derive(Deserialize, Debug, Clone)]
 struct SpaceDynamicData {
-    #[serde(default)]
     items: Vec<SpaceItem>,
 }
 
@@ -493,6 +493,7 @@ pub struct SpaceModules {
 #[derive(Deserialize, Debug, Clone)]
 pub struct ModuleAuthor {
     name: String,
+    #[serde(deserialize_with = "deserialize_numeric_string")]
     pub_ts: String,
 }
 
@@ -535,7 +536,18 @@ pub struct ArchiveInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ArchiveStat {
+    #[serde(deserialize_with = "deserialize_numeric_string")]
     pub play: String,
+}
+
+fn deserialize_numeric_string<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(value) => Ok(value),
+        serde_json::Value::Number(value) => Ok(value.to_string()),
+        _ => Err(serde::de::Error::custom("expected a string or number")),
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -616,43 +628,86 @@ fn parse_dynamic(item: SpaceItem) -> Option<AuthorDynamic> {
     })
 }
 
-pub async fn get_user_dynamics(
-    uid: u64,
-) -> Result<Vec<AuthorDynamic>, Box<dyn std::error::Error + Send + Sync>> {
-    let cached: Option<CachedDynamics> = dynamics_cache_path(uid)
+fn read_dynamics_cache(uid: u64) -> Option<CachedDynamics> {
+    dynamics_cache_path(uid)
         .and_then(|path| fs::read(path).ok())
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    if let Some(cache) = &cached
-        && !cache.items.is_empty()
-        && now.saturating_sub(cache.saved_at) < MOMENTS_CACHE_TTL
-    {
-        return Ok(cache.items.clone());
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+pub(crate) fn fresh_dynamics_cache(uid: u64) -> Option<(std::time::Duration, Vec<AuthorDynamic>)> {
+    let cache = read_dynamics_cache(uid)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let age = now.saturating_sub(cache.saved_at);
+    (age < dynamics_cache_ttl(&cache.items))
+        .then_some((std::time::Duration::from_secs(age), cache.items))
+}
+
+#[derive(Debug)]
+pub(crate) struct DynamicsLoad {
+    pub items: Vec<AuthorDynamic>,
+    pub warning: Option<String>,
+}
+
+pub async fn get_user_dynamics(uid: u64) -> Result<DynamicsLoad, ApiError> {
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+    let cached = read_dynamics_cache(uid);
+    let mut result = fetch_user_dynamics(uid).await;
+    if result.is_err() || result.as_ref().is_ok_and(Vec::is_empty) {
+        tokio::time::sleep(RETRY_DELAY).await;
+        result = fetch_user_dynamics(uid).await;
     }
+    if let Some(cache) = cached.filter(|cache| !cache.items.is_empty())
+        && (result.is_err() || result.as_ref().is_ok_and(Vec::is_empty))
+    {
+        let warning = match result {
+            Ok(_) => "API returned no dynamics; showing cached data".to_string(),
+            Err(error) => format!("Could not refresh dynamics; showing cached data: {error}"),
+        };
+        return Ok(DynamicsLoad {
+            items: cache.items,
+            warning: Some(warning),
+        });
+    }
+    let items = result?;
+    let warning = save_dynamics(uid, &items)
+        .err()
+        .map(|error| format!("Could not save dynamics cache: {error}"));
+    Ok(DynamicsLoad { items, warning })
+}
+
+pub(crate) fn dynamics_cache_ttl(items: &[AuthorDynamic]) -> u64 {
+    if items.is_empty() {
+        EMPTY_DYNAMICS_CACHE_TTL
+    } else {
+        MOMENTS_CACHE_TTL
+    }
+}
+
+async fn fetch_user_dynamics(uid: u64) -> Result<Vec<AuthorDynamic>, ApiError> {
     let query = Query::from([
         ("host_mid".into(), uid.to_string()),
         ("features".into(), "itemOpusStyle".into()),
     ]);
-    let data: SpaceDynamicData = match BilibiliClient::get()?
-        .get_api("/x/polymer/web-dynamic/v1/feed/space", query, true)
-        .await
-    {
-        Ok(data) => data,
-        Err(_) if cached.as_ref().is_some_and(|cache| !cache.items.is_empty()) => {
-            return Ok(cached.unwrap().items);
-        }
-        Err(error) => return Err(error),
-    };
+    const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+    let data: SpaceDynamicData = tokio::time::timeout(
+        REQUEST_TIMEOUT,
+        BilibiliClient::get()?.get_api("/x/polymer/web-dynamic/v1/feed/space", query, true),
+    )
+    .await
+    .map_err(|_| "Dynamics request timed out after 10 seconds")??;
+    collect_dynamics(data)
+}
 
-    let mut dynamics: Vec<AuthorDynamic> =
-        data.items.into_iter().filter_map(parse_dynamic).collect();
-
-    dynamics.sort_by_key(|dynamic| std::cmp::Reverse(dynamic.timestamp));
-    if dynamics.is_empty() {
-        return Ok(cached.map_or(dynamics, |cache| cache.items));
+fn collect_dynamics(data: SpaceDynamicData) -> Result<Vec<AuthorDynamic>, ApiError> {
+    let original_count = data.items.len();
+    let mut items: Vec<_> = data.items.into_iter().filter_map(parse_dynamic).collect();
+    if original_count > 0 && items.is_empty() {
+        return Err(
+            format!("Received {original_count} dynamics, but none had supported modules").into(),
+        );
     }
-    let _ = save_dynamics(uid, &dynamics);
-    Ok(dynamics)
+    items.sort_by_key(|dynamic| std::cmp::Reverse(dynamic.timestamp));
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -693,22 +748,45 @@ mod tests {
         let feed: SpaceDynamicData = serde_json::from_str(
             r#"{"items":[
                 {"modules":{"module_dynamic":{"desc":{"text":"ignored"}}}},
-                {"id_str":"123","modules":{"module_author":{"name":"author","pub_ts":"123"},
+                {"id_str":"123","modules":{"module_author":{"name":"author","pub_ts":123},
                     "module_dynamic":{"desc":null,"major":{"opus":{"summary":{"text":"caption"},"pics":[{}]}}}}},
                 {"modules":{"module_author":{"name":"author","pub_ts":"124"},
                     "module_dynamic":{"desc":{"text":"video"},"major":{"archive":
-                    {"bvid":"BV1example","title":"test","duration_text":"1:00","stat":{"play":"123"}}}}}}
+                    {"bvid":"BV1example","title":"test","duration_text":"1:00","stat":{"play":123}}}}}}
             ]}"#,
         )
         .unwrap();
-        let mut items = feed.items.into_iter();
-        assert!(parse_dynamic(items.next().unwrap()).is_none());
-        let opus = parse_dynamic(items.next().unwrap()).unwrap();
-        assert_eq!(opus.content, "caption");
-        assert!(opus.has_images);
-        assert_eq!(opus.opus_id.as_deref(), Some("123"));
-        let video = parse_dynamic(items.next().unwrap()).unwrap();
-        assert_eq!(video.video_info.unwrap().bvid, "BV1example");
+        let items = collect_dynamics(feed).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].timestamp, 124);
+        let video = items[0].video_info.as_ref().unwrap();
+        assert_eq!(video.bvid, "BV1example");
+        assert_eq!(video.stat.play, "123");
+        assert_eq!(items[1].timestamp, 123);
+        assert_eq!(items[1].content, "caption");
+        assert!(items[1].has_images);
+        assert_eq!(items[1].opus_id.as_deref(), Some("123"));
+        let cached: Vec<AuthorDynamic> =
+            serde_json::from_slice(&serde_json::to_vec(&items).unwrap()).unwrap();
+        assert_eq!(cached[0].video_info.as_ref().unwrap().stat.play, "123");
+        assert_eq!(dynamics_cache_ttl(&items), MOMENTS_CACHE_TTL);
+    }
+
+    #[test]
+    fn distinguishes_empty_feed_from_invalid_responses() {
+        for response in [r#"{}"#, r#"{"items":null}"#] {
+            assert!(serde_json::from_str::<SpaceDynamicData>(response).is_err());
+        }
+        let empty = serde_json::from_str(r#"{"items":[]}"#).unwrap();
+        assert!(collect_dynamics(empty).unwrap().is_empty());
+        let unsupported = serde_json::from_str(r#"{"items":[{"modules":{}}]}"#).unwrap();
+        assert!(
+            collect_dynamics(unsupported)
+                .unwrap_err()
+                .to_string()
+                .contains("1 dynamics")
+        );
+        assert_eq!(dynamics_cache_ttl(&[]), EMPTY_DYNAMICS_CACHE_TTL);
     }
 
     #[test]

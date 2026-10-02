@@ -5,11 +5,16 @@ use crate::terminal;
 use crate::ui;
 use crossterm::event::{self, Event};
 use ratatui::widgets::ListState;
-use std::{collections::HashSet, error::Error, io, time::Duration};
+use std::{
+    collections::HashMap,
+    error::Error,
+    io,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
 use tui_input::Input;
 
-type DynamicsResponse = (u64, Result<Vec<api::AuthorDynamic>, String>);
+type DynamicsResponse = (u64, Result<api::DynamicsLoad, String>);
 
 fn is_bilibili_url(url: &str) -> bool {
     url::Url::parse(url).ok().is_some_and(|parsed| {
@@ -193,10 +198,12 @@ pub struct App {
     pub dynamics_scroll_offset: usize,
     pub selected_dynamic_index: usize,
     pub dynamics_viewport_height: usize,
-    pub pending_dynamics: HashSet<u64>,
-    // Channel to handle async dynamics loading
-    pub dynamics_tx: Option<tokio::sync::mpsc::Sender<DynamicsResponse>>,
-    pub dynamics_rx: Option<tokio::sync::mpsc::Receiver<DynamicsResponse>>,
+    pub(crate) loading_author_uid: Option<u64>,
+    pub(crate) dynamics_cache: HashMap<u64, (Instant, Vec<api::AuthorDynamic>)>,
+    pub(crate) scheduled_dynamics: Option<(u64, Instant)>,
+    pub(crate) last_manual_dynamics_refresh: Option<Instant>,
+    pub(crate) dynamics_tx: tokio::sync::mpsc::Sender<DynamicsResponse>,
+    dynamics_rx: tokio::sync::mpsc::Receiver<DynamicsResponse>,
     mpv_tx: tokio::sync::mpsc::Sender<MpvResponse>,
     mpv_rx: tokio::sync::mpsc::Receiver<MpvResponse>,
 }
@@ -226,9 +233,12 @@ impl App {
             dynamics_scroll_offset: 0,
             selected_dynamic_index: 0,
             dynamics_viewport_height: 20, // Default value
-            pending_dynamics: HashSet::new(),
-            dynamics_tx: Some(dynamics_tx),
-            dynamics_rx: Some(dynamics_rx),
+            loading_author_uid: None,
+            dynamics_cache: HashMap::new(),
+            scheduled_dynamics: None,
+            last_manual_dynamics_refresh: None,
+            dynamics_tx,
+            dynamics_rx,
             mpv_tx,
             mpv_rx,
         }
@@ -512,25 +522,28 @@ impl App {
     }
 
     fn handle_dynamics_response(&mut self) {
-        let response = self
-            .dynamics_rx
-            .as_mut()
-            .and_then(|receiver| receiver.try_recv().ok());
-        let Some((uid, result)) = response else {
+        self.start_scheduled_dynamics();
+        let Ok((uid, result)) = self.dynamics_rx.try_recv() else {
             return;
         };
-        self.pending_dynamics.remove(&uid);
-        let is_selected = self.is_selected_author(uid);
+        self.loading_author_uid = None;
+        let is_selected = self.selected_author_uid() == Some(uid);
         match result {
-            Ok(dynamics) => {
-                self.apply_dynamics(uid, dynamics);
+            Ok(loaded) => {
+                if is_selected && let Some(warning) = loaded.warning {
+                    self.add_message(warning, MessageLevel::Warning);
+                }
+                let dynamics = loaded.items;
+                let count = dynamics.len();
+                self.dynamics_cache
+                    .insert(uid, (Instant::now(), dynamics.clone()));
                 if is_selected {
-                    self.loading_dynamics = false;
+                    self.apply_dynamics(dynamics);
+                    self.add_message(format!("Loaded {count} dynamics"), MessageLevel::Success);
                 }
             }
             Err(error) if is_selected => {
                 self.loading_dynamics = false;
-                self.selected_author_dynamics = None;
                 self.add_message(
                     format!("Failed to load dynamics: {error}"),
                     MessageLevel::Error,
@@ -540,29 +553,158 @@ impl App {
         }
     }
 
-    fn is_selected_author(&self, uid: u64) -> bool {
-        self.selected_author.selected().is_some_and(|index| {
+    pub(crate) fn selected_author_uid(&self) -> Option<u64> {
+        let index = self.selected_author.selected()?;
+        Some(
             self.moments_data
-                .as_ref()
-                .and_then(|data| data.get(index))
-                .is_some_and(|author| author.user_profile.info.uid == uid)
-        })
+                .as_ref()?
+                .get(index)?
+                .user_profile
+                .info
+                .uid,
+        )
     }
 
-    fn apply_dynamics(&mut self, uid: u64, dynamics: Vec<api::AuthorDynamic>) {
-        let count = dynamics.len();
-        if self.is_selected_author(uid) {
-            self.selected_author_dynamics = Some(dynamics);
-            self.dynamics_scroll_offset = 0;
-            self.selected_dynamic_index = 0;
-            self.add_message(format!("Loaded {count} dynamics"), MessageLevel::Success);
-        }
+    pub(crate) fn apply_dynamics(&mut self, dynamics: Vec<api::AuthorDynamic>) {
+        self.selected_author_dynamics = Some(dynamics);
+        self.dynamics_scroll_offset = 0;
+        self.selected_dynamic_index = 0;
+        self.loading_dynamics = false;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_bilibili_url;
+    use super::{App, is_bilibili_url};
+    use std::time::{Duration, Instant};
+
+    fn moments_app() -> App {
+        let mut app = App::new();
+        app.moments_data = Some(vec![
+            serde_json::from_str(
+                r#"{"user_profile":{"info":{"uid":18446744073709551615,"uname":"test"}}}"#,
+            )
+            .unwrap(),
+        ]);
+        app.selected_author.select(Some(0));
+        app
+    }
+
+    #[test]
+    fn dynamics_cache_and_selection_do_not_duplicate_requests() {
+        let mut app = moments_app();
+        app.dynamics_cache
+            .insert(u64::MAX, (Instant::now(), vec![]));
+        for _ in 0..2 {
+            app.load_author_dynamics(u64::MAX);
+        }
+        assert!(app.selected_author_dynamics.as_ref().unwrap().is_empty());
+        assert!(!app.loading_dynamics);
+        assert!(app.scheduled_dynamics.is_none());
+        app.dynamics_cache.clear();
+        app.scheduled_dynamics = Some((123, Instant::now()));
+        app.load_author_dynamics(u64::MAX);
+        assert_eq!(app.scheduled_dynamics.unwrap().0, u64::MAX);
+        app.start_scheduled_dynamics();
+        assert!(app.loading_author_uid.is_none());
+        app.loading_author_uid = Some(123);
+        app.scheduled_dynamics.as_mut().unwrap().1 -= Duration::from_secs(1);
+        app.start_scheduled_dynamics();
+        assert_eq!(app.loading_author_uid, Some(123));
+        app.loading_author_uid = Some(u64::MAX);
+        app.load_author_dynamics(u64::MAX);
+        assert!(app.scheduled_dynamics.is_none());
+        assert!(app.messages.is_empty());
+    }
+
+    #[test]
+    fn dynamics_responses_cache_results_and_preserve_selection_on_failure() {
+        let mut app = moments_app();
+        let items: Vec<crate::api::AuthorDynamic> = serde_json::from_str(
+            r#"[{"content":"fresh","timestamp":1,"author_name":"test","stats":null,"video_info":null}]"#,
+        ).unwrap();
+        app.selected_author_dynamics = Some(vec![]);
+        for uid in [123, u64::MAX] {
+            app.loading_author_uid = Some(uid);
+            app.loading_dynamics = true;
+            app.dynamics_tx
+                .try_send((
+                    uid,
+                    Ok(crate::api::DynamicsLoad {
+                        items: items.clone(),
+                        warning: None,
+                    }),
+                ))
+                .unwrap();
+            app.handle_dynamics_response();
+            assert_eq!(app.dynamics_cache[&uid].1[0].content, "fresh");
+            assert!(app.loading_author_uid.is_none());
+            if uid == 123 {
+                assert!(app.selected_author_dynamics.as_ref().unwrap().is_empty());
+                assert!(app.messages.is_empty());
+            } else {
+                assert!(!app.loading_dynamics);
+                assert_eq!(
+                    app.selected_author_dynamics.as_ref().unwrap()[0].content,
+                    "fresh"
+                );
+            }
+        }
+        app.loading_author_uid = Some(u64::MAX);
+        app.loading_dynamics = true;
+        app.dynamics_tx
+            .try_send((u64::MAX, Err("network error".to_string())))
+            .unwrap();
+        app.handle_dynamics_response();
+        assert!(!app.loading_dynamics);
+        assert_eq!(
+            app.selected_author_dynamics.as_ref().unwrap()[0].content,
+            "fresh"
+        );
+        assert!(app.loading_author_uid.is_none());
+    }
+
+    #[tokio::test]
+    async fn refresh_key_bypasses_cache_only_in_moments_and_obeys_global_cooldown() {
+        use super::{ActivePage, Focusable, InputMode};
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let key = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
+        let mut app = moments_app();
+        app.set_input_mode(InputMode::Normal);
+        crate::handler::handle_key_event(&mut app, key, &tx)
+            .await
+            .unwrap();
+        assert!(app.loading_author_uid.is_none());
+        app.set_active_page(ActivePage::Moments);
+        app.set_focused_panel(Focusable::MomentsAuthors);
+        app.dynamics_cache
+            .insert(u64::MAX, (Instant::now(), vec![]));
+        app.selected_author_dynamics = Some(vec![]);
+        app.loading_author_uid = Some(123);
+        app.refresh_selected_author_dynamics();
+        assert!(app.last_manual_dynamics_refresh.is_none());
+        app.loading_author_uid = None;
+        crate::handler::handle_key_event(&mut app, key, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.loading_author_uid, Some(u64::MAX));
+        assert!(app.selected_author_dynamics.is_some());
+        let refreshed_at = app.last_manual_dynamics_refresh;
+        app.loading_author_uid = None;
+        app.moments_data.as_mut().unwrap()[0].user_profile.info.uid = 123;
+        app.set_focused_panel(Focusable::MomentsContent);
+        crate::handler::handle_key_event(&mut app, key, &tx)
+            .await
+            .unwrap();
+        assert!(app.loading_author_uid.is_none());
+        assert_eq!(app.last_manual_dynamics_refresh, refreshed_at);
+        app.last_manual_dynamics_refresh = Some(Instant::now() - Duration::from_secs(60));
+        crate::handler::handle_key_event(&mut app, key, &tx)
+            .await
+            .unwrap();
+        assert_eq!(app.loading_author_uid, Some(123));
+    }
 
     #[test]
     fn only_bilibili_hosts_receive_session_cookie() {

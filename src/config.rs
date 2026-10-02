@@ -192,6 +192,16 @@ impl FollowingConfig {
     }
 }
 
+pub(crate) fn data_dir() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".bili-tui"))
+}
+
+fn get_config_path() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    let config_dir = data_dir().ok_or("Could not find home directory")?;
+
+    Ok(config_dir.join("following.json"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,14 +223,4 @@ mod tests {
             2
         );
     }
-}
-
-pub(crate) fn data_dir() -> Option<PathBuf> {
-    Some(dirs::home_dir()?.join(".bili-tui"))
-}
-
-fn get_config_path() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-    let config_dir = data_dir().ok_or("Could not find home directory")?;
-
-    Ok(config_dir.join("following.json"))
 }

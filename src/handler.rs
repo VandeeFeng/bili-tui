@@ -152,6 +152,10 @@ impl NavigationHandler for App {
                 let _ = crate::command::execute(cmd, self).await;
                 return Ok(false);
             }
+            KeyCode::Char('r') if self.navigation.current_page == ActivePage::Moments => {
+                self.refresh_selected_author_dynamics();
+                return Ok(false);
+            }
             KeyCode::Char('p') => {
                 // Handle play for both search results and dynamics
                 if self.navigation.current_page == ActivePage::Moments
@@ -268,28 +272,97 @@ impl App {
 
     /// Load dynamics for a specific author
     pub(crate) fn load_author_dynamics(&mut self, uid: u64) {
-        self.add_message(
-            format!("Loading dynamics for UID: {}", uid),
-            MessageLevel::Info,
-        );
+        self.scheduled_dynamics = None;
+        let cached = self
+            .dynamics_cache
+            .get(&uid)
+            .filter(|(saved_at, items)| {
+                saved_at.elapsed().as_secs() < crate::api::dynamics_cache_ttl(items)
+            })
+            .map(|(_, items)| items.clone())
+            .or_else(|| {
+                let (age, items) = crate::api::fresh_dynamics_cache(uid)?;
+                let now = std::time::Instant::now();
+                self.dynamics_cache
+                    .insert(uid, (now.checked_sub(age).unwrap_or(now), items.clone()));
+                Some(items)
+            });
+        if let Some(items) = cached {
+            self.apply_dynamics(items);
+            return;
+        }
         self.loading_dynamics = true;
         self.selected_author_dynamics = None;
         self.dynamics_scroll_offset = 0;
         self.selected_dynamic_index = 0;
-        if !self.pending_dynamics.insert(uid) {
+        if self.loading_author_uid != Some(uid) {
+            self.scheduled_dynamics = Some((uid, std::time::Instant::now()));
+        }
+    }
+
+    pub(crate) fn start_scheduled_dynamics(&mut self) {
+        const SELECTION_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+        let Some((uid, selected_at)) = self.scheduled_dynamics else {
+            return;
+        };
+        if selected_at.elapsed() < SELECTION_DELAY || self.loading_author_uid.is_some() {
             return;
         }
+        self.scheduled_dynamics = None;
+        self.request_author_dynamics(uid);
+    }
 
-        // Start async loading
-        if let Some(ref tx) = self.dynamics_tx {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let result = crate::api::get_user_dynamics(uid)
-                    .await
-                    .map_err(|error| error.to_string());
-                let _ = tx.send((uid, result)).await;
-            });
+    fn request_author_dynamics(&mut self, uid: u64) {
+        self.loading_author_uid = Some(uid);
+        self.loading_dynamics = true;
+        self.add_message(
+            format!("Loading dynamics for UID: {uid}"),
+            MessageLevel::Info,
+        );
+        let tx = self.dynamics_tx.clone();
+        tokio::spawn(async move {
+            let result = crate::api::get_user_dynamics(uid)
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tx.send((uid, result)).await;
+        });
+    }
+
+    pub(crate) fn refresh_selected_author_dynamics(&mut self) {
+        let Some(uid) = self.selected_author_uid() else {
+            return;
+        };
+        if !self.manual_dynamics_refresh_ready() {
+            return;
         }
+        if self.loading_author_uid.is_some() {
+            self.add_message(
+                "Dynamics are loading; try refreshing after completion".to_string(),
+                MessageLevel::Info,
+            );
+            return;
+        }
+        self.scheduled_dynamics = None;
+        self.request_author_dynamics(uid);
+        self.last_manual_dynamics_refresh = Some(std::time::Instant::now());
+    }
+
+    fn manual_dynamics_refresh_ready(&mut self) -> bool {
+        const REFRESH_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60);
+        if let Some(last_refresh) = self.last_manual_dynamics_refresh
+            && let Some(remaining) = REFRESH_COOLDOWN.checked_sub(last_refresh.elapsed())
+            && !remaining.is_zero()
+        {
+            self.add_message(
+                format!(
+                    "Manual refresh cooldown: wait {} seconds",
+                    remaining.as_secs_f64().ceil() as u64
+                ),
+                MessageLevel::Info,
+            );
+            return false;
+        }
+        true
     }
 
     /// Handle navigation in moments authors panel

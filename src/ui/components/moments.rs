@@ -67,7 +67,8 @@ pub fn render_moments_panel(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_stateful_widget(authors_list, moments_chunks[0], &mut app.selected_author);
 
     // Right panel: Selected author dynamics
-    let selected_author_content = if app.loading_dynamics {
+    let selected_author_content = if app.loading_dynamics && app.selected_author_dynamics.is_none()
+    {
         vec![
             Line::from("Loading dynamics...".italic().fg(Color::Yellow)),
             Line::from(""),
